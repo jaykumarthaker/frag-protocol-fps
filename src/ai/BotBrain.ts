@@ -27,6 +27,7 @@ const DIFFICULTY: Record<MatchConfig['difficulty'], DiffParams> = {
 };
 
 type State = 'roam' | 'combat' | 'hunt';
+type BotRole = 'attacker' | 'defender';
 
 /**
  * Bot intelligence: perception (line-of-sight scans), waypoint navigation
@@ -39,6 +40,10 @@ export class BotBrain {
   private p: DiffParams;
 
   private state: State = 'roam';
+  /** Cash Raid disposition — roughly one defender per three bots. */
+  private role: BotRole = Math.random() < 0.34 ? 'defender' : 'attacker';
+  /** Set each frame: true when the bot wants to channel a vault interaction. */
+  wantInteract = false;
   private target: Actor | null = null;
   private targetAcquiredAt = 0;
   private lastSeenAt = -99;
@@ -106,11 +111,14 @@ export class BotBrain {
       this.state = 'roam';
     }
 
+    this.wantInteract = false;
     let intent: BotIntent;
     switch (this.state) {
       case 'combat': intent = this.combat(dt); break;
       case 'hunt':   intent = this.hunt(); break;
-      default:       intent = this.roam(g.time); break;
+      default:
+        intent = g.gameMode === 'cashraid' ? this.objectiveRoam() : this.roam(g.time);
+        break;
     }
 
     this.steerAim(dt);
@@ -172,6 +180,15 @@ export class BotBrain {
       .addScaledVector(toT, approach)
       .addScaledVector(right, this.strafeSign * 0.85);
 
+    // Cash Raid: a money carrier fights its way home rather than holding ground
+    if (this.game.gameMode === 'cashraid' && bot.carried > 0) {
+      const home = this.game.vaults.find((v) => v.team === bot.team);
+      if (home) {
+        const toHome = home.center.clone().sub(bot.position).setY(0);
+        if (toHome.lengthSq() > 1e-4) wishDir.addScaledVector(toHome.normalize(), 1.2);
+      }
+    }
+
     // dodge: periodically, or reactively when recently hit
     let dodge: THREE.Vector3 | null = null;
     const hitRecently = this.game.time - bot.lastDamagedAt < 0.25;
@@ -201,8 +218,12 @@ export class BotBrain {
     if (this.path.length === 0 || this.pathIndex >= this.path.length || time >= this.repathAt) {
       this.chooseDestination();
     }
+    return this.followPath(time);
+  }
+
+  /** Walk the current path; falls back to a gentle wander when path-less. */
+  private followPath(time: number): BotIntent {
     if (this.path.length === 0) {
-      // fallback wander
       const a = (time * 0.3 + this.bot.position.x) % (Math.PI * 2);
       const wishDir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
       this.desiredYaw = Math.atan2(-wishDir.x, -wishDir.z);
@@ -211,7 +232,7 @@ export class BotBrain {
     const node = this.path[this.pathIndex];
     if (this.bot.position.distanceTo(node) < 2.4) {
       this.pathIndex++;
-      if (this.pathIndex >= this.path.length) { this.path = []; }
+      if (this.pathIndex >= this.path.length) this.path = [];
       return { wishDir: new THREE.Vector3(), jump: false, dodge: null };
     }
     const wishDir = this.dirTo(node);
@@ -229,13 +250,62 @@ export class BotBrain {
     } else {
       dest = arena.waypoints[(Math.random() * arena.waypoints.length) | 0];
     }
+    this.pathToward(dest);
+  }
+
+  /** A* a path to a specific world position. */
+  private pathToward(dest: THREE.Vector3) {
+    const arena = this.game.arena;
     const start = nearestWaypoint(arena.waypoints, this.bot.position);
     const goal = nearestWaypoint(arena.waypoints, dest);
     const idx = findPath(arena.waypoints, arena.waypointLinks, start, goal);
     this.path = idx.map((i) => arena.waypoints[i].clone());
     if (this.path.length > 0) this.path.push(dest.clone());
+    else this.path = [dest.clone()];
     this.pathIndex = 0;
     this.repathAt = this.game.time + 8;
+  }
+
+  /** Cash Raid roam: pursue the bot's objective (raid / carry / defend). */
+  private objectiveRoam(): BotIntent {
+    const g = this.game;
+    const bot = this.bot;
+    const ownVault = g.vaults.find((v) => v.team === bot.team) ?? null;
+    const enemyVault = g.vaults.find((v) => v.team !== bot.team) ?? null;
+
+    let targetVault = ownVault;
+    let interactHere = false;
+    if (bot.carried >= 1) {
+      // carry the money home and bank it
+      targetVault = ownVault;
+      interactHere = !!ownVault && ownVault.containsActor(bot);
+    } else if (this.role === 'defender') {
+      // guard the home vault; patrol around it, never interact
+      targetVault = ownVault;
+      if (ownVault && bot.position.distanceTo(ownVault.center) < 9) {
+        return this.roam(g.time);
+      }
+    } else {
+      // raid the enemy vault for cash
+      targetVault = enemyVault;
+      interactHere = !!enemyVault && enemyVault.containsActor(bot);
+    }
+
+    if (interactHere && targetVault) {
+      this.wantInteract = true;
+      const d = this.dirTo(targetVault.center);
+      if (d.lengthSq() > 1e-4) this.desiredYaw = Math.atan2(-d.x, -d.z);
+      return { wishDir: new THREE.Vector3(), jump: false, dodge: null };
+    }
+
+    if (!targetVault) return this.roam(g.time);
+    if (
+      this.path.length === 0 || this.pathIndex >= this.path.length ||
+      g.time >= this.repathAt
+    ) {
+      this.pathToward(targetVault.center);
+    }
+    return this.followPath(g.time);
   }
 
   // ---- aiming + firing ------------------------------------------------

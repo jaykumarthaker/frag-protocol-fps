@@ -23,12 +23,26 @@ export interface HitscanResult {
   distance: number;
 }
 
-/** Match configuration chosen from the menu. */
+/** Which set of rules a match runs. */
+export type GameMode = 'deathmatch' | 'cashraid';
+
+/**
+ * Team allegiance. 0 = none (deathmatch — everyone is an enemy); 1/2 are the
+ * two Cash Raid teams. Kept numeric so it is cheap on the wire.
+ */
+export type Team = 0 | 1 | 2;
+
+/** Match configuration chosen from the menu / lobby. */
 export interface MatchConfig {
+  mode: GameMode;
   botCount: number;
   fragLimit: number;
   timeLimitSec: number;
   difficulty: 'rookie' | 'skilled' | 'deadly';
+  /** Cash Raid: money each team's bank starts with. */
+  startMoney?: number;
+  /** Cash Raid: bank total that triggers an instant win. */
+  winTarget?: number;
 }
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'matchover';

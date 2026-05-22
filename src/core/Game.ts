@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Physics } from '../physics/Physics';
 import { Arena } from '../arena/Arena';
+import { CashRaidArena } from '../arena/CashRaidArena';
 import { Input } from './Input';
 import { Audio } from '../audio/Audio';
 import { Effects } from '../effects/Effects';
@@ -12,17 +13,25 @@ import { RemotePlayer } from '../entities/RemotePlayer';
 import { Projectile, type ProjectileOpts } from '../entities/Projectile';
 import { Pickup } from '../entities/Pickup';
 import { Match } from '../game/Match';
+import { CashRaidRules } from '../game/CashRaidRules';
+import type { MatchRules } from '../game/MatchRules';
+import { TEAM_COLORS, sameTeam, teamName, enemyOf } from '../game/teams';
+import { SHOP_ITEMS, type ShopItem } from '../game/shop';
+import { VaultZone } from '../entities/VaultZone';
+import { BuyStation } from '../entities/BuyStation';
+import { CashDrop } from '../entities/CashDrop';
 import { HUD } from '../ui/HUD';
 import { Menu, type GameSettings } from '../ui/Menu';
+import { BuyMenu } from '../ui/BuyMenu';
 import { NetClient } from '../net/NetClient';
-import type { ServerMsg, NetPlayer } from '../net/protocol';
-import { WEAPONS } from '../weapons/Weapons';
+import type { ServerMsg, NetPlayer, LobbyConfig } from '../net/protocol';
+import { WEAPONS, WEAPON_ORDER } from '../weapons/Weapons';
 import { loadModels } from './Models';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import type { DamageInfo, HitscanResult, MatchConfig, GameState } from './types';
+import type { DamageInfo, HitscanResult, MatchConfig, GameState, GameMode, Team } from './types';
 
 const WEAPON_LABEL: Record<string, string> = {
   railgun: 'RAILGUN', shard: 'SHARD CANNON', rocket: 'ROCKET',
@@ -33,6 +42,10 @@ const BOT_NAMES = ['VEX', 'RAZE', 'NOVA', 'KILO', 'ZERO', 'ORYX', 'BANE'];
 const BOT_COLORS = [0xff7a18, 0xff3b3b, 0xb98bff, 0x6dff8a, 0xffd23f, 0xff5ec4, 0x5ec8ff];
 
 const RESPAWN_DELAY = 2.5;
+/** Seconds an actor must channel inside a vault to deposit or steal. */
+const DEPOSIT_TIME = 2;
+/** Fraction of carried money that survives as a ground drop on death. */
+const DEATH_DROP_FRACTION = 0.70;
 
 /**
  * Central orchestrator: owns the renderer/scene/camera, all subsystems and
@@ -59,7 +72,14 @@ export class Game {
   player: Player | null = null;
   projectiles: Projectile[] = [];
   pickups: Pickup[] = [];
-  match!: Match;
+  match!: MatchRules;
+
+  // Cash Raid state (null / empty in deathmatch)
+  cashRules: CashRaidRules | null = null;
+  vaults: VaultZone[] = [];
+  buyStations: BuyStation[] = [];
+  cashDrops: CashDrop[] = [];
+  buyMenu!: BuyMenu;
 
   // online play
   mode: 'offline' | 'online' = 'offline';
@@ -68,6 +88,8 @@ export class Game {
   remotes = new Map<number, RemotePlayer>();
 
   state: GameState = 'menu';
+  /** Active rule set for the current match. */
+  gameMode: GameMode = 'deathmatch';
   time = 0;
   settings: GameSettings = { sensitivity: 1.0, volume: 0.7, fov: 95 };
 
@@ -79,6 +101,7 @@ export class Game {
   private inputAccum = 0;
   private onlineUrl = '';
   private onlineName = 'PLAYER';
+  private roomCode = '';
 
   static async create(parent: HTMLElement): Promise<Game> {
     const g = new Game();
@@ -114,13 +137,21 @@ export class Game {
     g.weapons = new WeaponSystem(g);
     g.hud = new HUD(parent);
     g.hud.setVisible(false);
+    g.buyMenu = new BuyMenu(parent);
     g.menu = new Menu(parent, {
       settings: g.settings,
       onStart: (cfg) => g.startMatch(cfg),
       onResume: () => g.resume(),
       onRestart: () => g.restart(),
       onMainMenu: () => g.toMainMenu(),
-      onConnectOnline: (url, name) => g.startOnline(url, name),
+      onCreateRoom: (url, name, config) => g.createRoom(url, name, config),
+      onJoinRoom: (url, name, code) => g.joinRoom(url, name, code),
+      onLeaveRoom: () => g.leaveOnline(),
+      onLobbyReady: (r) => g.lobbySetReady(r),
+      onLobbySelectTeam: (t) => g.lobbySelectTeam(t),
+      onLobbyConfig: (c) => g.lobbyConfig(c),
+      onLobbyKick: (id) => g.lobbyKick(id),
+      onLobbyStart: () => g.lobbyStart(),
     });
 
     g.input.onPointerUnlock = () => { if (g.state === 'playing') g.pause(); };
@@ -240,7 +271,10 @@ export class Game {
   private updatePlaying(dt: number) {
     this.time += dt;
 
-    if (this.input.keyPressed('Escape')) { this.pause(); return; }
+    if (this.input.keyPressed('Escape')) {
+      if (this.buyMenu.isOpen) this.buyMenu.close();
+      else { this.pause(); return; }
+    }
 
     const player = this.player!;
     player.update(dt);
@@ -255,6 +289,7 @@ export class Game {
     for (const p of this.pickups) p.update(dt);
     this.effects.update(dt);
     this.updateRespawns();
+    if (this.gameMode === 'cashraid') this.updateCashRaid(dt);
 
     if (this.match.update(dt, this.actors)) { this.endMatch(); return; }
 
@@ -266,8 +301,8 @@ export class Game {
     for (const bot of this.bots) bot.syncMesh(dt);
 
     const showScores = this.input.key('Tab');
-    this.hud.toggleScoreboard(showScores, this.match, this.actors, player);
-    this.hud.update(player, this.match, this.actors, this.time);
+    this.hud.toggleScoreboard(showScores, this.match, this.actors, player, this.cashRules);
+    this.hud.update(player, this.match, this.actors, this.time, this.cashRules);
   }
 
   private updateRespawns() {
@@ -295,22 +330,36 @@ export class Game {
   private startMatch(config: MatchConfig) {
     this.clearMatch();
     this.lastConfig = config;
+    this.gameMode = config.mode;
+    this.ensureArena(config.mode);
     this.firstBloodDone = false;
     this.time = 0;
-    this.match = new Match(config);
+
+    const cashRaid = config.mode === 'cashraid';
+    this.cashRules = cashRaid ? new CashRaidRules(config) : null;
+    this.match = this.cashRules ?? new Match(config);
 
     const spawns = this.arena.spawnPoints;
+    // In Cash Raid the local player + bots are split into two balanced teams;
+    // team 1 takes the extra slot when the headcount is odd.
+    const team1Count = Math.ceil((1 + config.botCount) / 2);
+
     this.player = new Player(this, 'YOU', spawns[0], this.camera);
+    this.player.team = cashRaid ? 1 : 0;
     this.actors.push(this.player);
 
     for (let i = 0; i < config.botCount; i++) {
+      // bots 0..(team1Count-2) join team 1 (the player already filled one slot)
+      const team: Team = cashRaid ? (i < team1Count - 1 ? 1 : 2) : 0;
+      const color = cashRaid ? TEAM_COLORS[team] : BOT_COLORS[i % BOT_COLORS.length];
       const bot = new Bot(
         this,
         BOT_NAMES[i % BOT_NAMES.length],
-        BOT_COLORS[i % BOT_COLORS.length],
+        color,
         spawns[(i + 1) % spawns.length],
         config.difficulty,
       );
+      bot.team = team;
       this.actors.push(bot);
       this.bots.push(bot);
       this.scene.add(bot.mesh);
@@ -319,6 +368,13 @@ export class Game {
     for (const ps of this.arena.pickupSpawns) {
       this.pickups.push(new Pickup(this, ps.type, ps.pos));
     }
+
+    // Cash Raid: basic-weapon-only loadout (purchases extend it) + vaults/kiosks
+    for (const a of this.actors) {
+      a.loadout = cashRaid ? new Set(['pulse']) : new Set(WEAPON_ORDER);
+    }
+    if (cashRaid) this.buildCashZones();
+
     for (const a of this.actors) this.respawnActor(a);
 
     // step once so the query pipeline / broad-phase includes the new actor
@@ -347,16 +403,41 @@ export class Game {
     }
     for (const p of this.projectiles) p.dispose();
     for (const p of this.pickups) p.dispose();
+    for (const v of this.vaults) v.dispose();
+    for (const b of this.buyStations) b.dispose();
+    for (const d of this.cashDrops) d.dispose();
     this.actors = [];
     this.bots = [];
     this.projectiles = [];
     this.pickups = [];
+    this.vaults = [];
+    this.buyStations = [];
+    this.cashDrops = [];
+    this.cashRules = null;
+    this.buyMenu.close();
     this.player = null;
   }
 
+  /** The current arena as a CashRaidArena, or null in deathmatch. */
+  get cashArena(): CashRaidArena | null {
+    return this.arena instanceof CashRaidArena ? this.arena : null;
+  }
+
+  /** Swap the live arena so it matches the requested game mode. */
+  private ensureArena(mode: GameMode) {
+    const wantCash = mode === 'cashraid';
+    if (wantCash === (this.arena instanceof CashRaidArena)) return;
+    this.arena.dispose();
+    this.arena = wantCash
+      ? new CashRaidArena(this.scene, this.physics)
+      : new Arena(this.scene, this.physics);
+    this.arena.build();
+  }
+
   private restart() {
-    if (this.mode === 'online') this.startOnline(this.onlineUrl, this.onlineName);
-    else if (this.lastConfig) this.startMatch(this.lastConfig);
+    // online matches reset on the server; "play again" returns to the hub
+    if (this.mode === 'online') { this.leaveOnline(); return; }
+    if (this.lastConfig) this.startMatch(this.lastConfig);
   }
 
   private endMatch() {
@@ -364,9 +445,18 @@ export class Game {
     this.input.exitLock();
     this.audio.setMuffled(true);
     this.hud.setVisible(false);
-    const ranking = this.match.ranking(this.actors);
-    this.audio.announce(this.match.winner === this.player ? 'You win' : 'Match over');
-    this.menu.showEnd(ranking, this.match.winner, this.player!);
+    this.buyMenu.close();
+    if (this.gameMode === 'cashraid' && this.cashRules) {
+      const r = this.cashRules;
+      const won = !!this.player && r.winner === this.player.team;
+      this.audio.announce(won ? 'You win' : r.winner === 0 ? 'Draw' : 'Match over');
+      this.menu.showCashRaidEnd(r, this.actors, this.player!);
+    } else {
+      const m = this.match as Match;
+      const ranking = m.ranking(this.actors);
+      this.audio.announce(m.winner === this.player ? 'You win' : 'Match over');
+      this.menu.showEnd(ranking, m.winner, this.player!);
+    }
   }
 
   private pause() {
@@ -374,6 +464,7 @@ export class Game {
     this.state = 'paused';
     this.input.exitLock();
     this.audio.setMuffled(true);
+    this.buyMenu.close();
     this.menu.showPause();
   }
 
@@ -397,16 +488,26 @@ export class Game {
   }
 
   private respawnActor(a: Actor) {
-    a.respawn(this.chooseSpawn());
+    a.respawn(this.chooseSpawn(a));
+    if (this.gameMode === 'cashraid' && a.isBot) this.botAutoBuy(a);
     this.effects.flash(a.position.clone(), a.colorHex, 2.2, 0.3);
     this.audio.play('spawn', a === this.player ? undefined : a.position);
   }
 
+  /** Spawn points an actor may use — its team's subset in Cash Raid. */
+  private spawnCandidates(actor?: Actor): THREE.Vector3[] {
+    const all = this.arena.spawnPoints;
+    if (this.gameMode !== 'cashraid' || !actor || actor.team === 0) return all;
+    const half = Math.ceil(all.length / 2);
+    return actor.team === 1 ? all.slice(0, half) : all.slice(half);
+  }
+
   /** Pick the spawn point furthest from currently-alive actors. */
-  private chooseSpawn(): THREE.Vector3 {
-    let best = this.arena.spawnPoints[0];
+  private chooseSpawn(actor?: Actor): THREE.Vector3 {
+    const candidates = this.spawnCandidates(actor);
+    let best = candidates[0];
     let bestScore = -Infinity;
-    for (const sp of this.arena.spawnPoints) {
+    for (const sp of candidates) {
       let minD = Infinity;
       for (const a of this.actors) {
         if (a.alive) minD = Math.min(minD, a.position.distanceTo(sp));
@@ -451,6 +552,11 @@ export class Game {
 
   applyDamage(target: Actor, info: DamageInfo) {
     if (this.mode === 'online') { this.applyDamageOnline(target, info); return; }
+    // Cash Raid: no friendly fire (self-damage — rocket jumps — still lands).
+    if (
+      this.gameMode === 'cashraid' && info.attacker &&
+      info.attacker !== target && sameTeam(info.attacker, target)
+    ) return;
     const res = target.takeDamage(info);
     if (res.dealt > 0) {
       this.effects.impact(info.point, new THREE.Vector3(0, 1, 0), 0xff5a5a);
@@ -476,6 +582,8 @@ export class Game {
     }
     for (const a of this.actors) {
       if (!a.alive || a === exclude) continue;
+      // Cash Raid: splash spares teammates (the source still hurts itself).
+      if (this.gameMode === 'cashraid' && source && a !== source && sameTeam(source, a)) continue;
       const d = a.position.distanceTo(center);
       if (d > radius) continue;
       const falloff = 1 - d / radius;
@@ -500,6 +608,16 @@ export class Game {
     this.effects.explosion(victim.position.clone(), 2.4, victim.colorHex);
     this.audio.play('die', victim.position);
 
+    // Cash Raid: a dead carrier drops most of their money on the ground.
+    if (this.gameMode === 'cashraid' && victim.carried > 0) {
+      const dropped = Math.floor(victim.carried * DEATH_DROP_FRACTION);
+      victim.carried = 0;
+      if (dropped > 0) {
+        this.spawnCashDrop(victim.position, dropped);
+        this.hud.addCashEvent(`${victim.name} dropped  $${dropped.toLocaleString()}`);
+      }
+    }
+
     const suicide = !killer || killer === victim;
     if (suicide) victim.frags = Math.max(0, victim.frags - 1);
     else killer!.frags++;
@@ -514,6 +632,8 @@ export class Game {
       label,
       !suicide && killer === this.player,
       victim === this.player,
+      suicide ? 0 : killer!.team,
+      victim.team,
     );
 
     if (suicide) return;
@@ -546,64 +666,324 @@ export class Game {
   }
 
   // ===================================================================
-  //  online play
+  //  Cash Raid
   // ===================================================================
 
-  private async startOnline(url: string, name: string) {
+  /** Build the vault zones + buy-station kiosks for the active map. */
+  private buildCashZones() {
+    const arena = this.cashArena;
+    if (!arena) return;
+    for (const def of arena.vaultDefs) {
+      this.vaults.push(new VaultZone(this.scene, def, TEAM_COLORS[def.team]));
+    }
+    for (const def of arena.buyDefs) {
+      this.buyStations.push(new BuyStation(this.scene, def, TEAM_COLORS[def.team]));
+    }
+  }
+
+  /** Per-frame Cash Raid update: zones, cash drops, the local player's E/B. */
+  private updateCashRaid(dt: number) {
+    for (const v of this.vaults) v.update(dt);
+    for (const b of this.buyStations) b.update(dt);
+    for (let i = this.cashDrops.length - 1; i >= 0; i--) {
+      const d = this.cashDrops[i];
+      d.update(dt);
+      if (!d.dead) continue;
+      if (d.collectedBy) {
+        this.effects.flash(d.pos.clone().setY(d.pos.y + 0.6), 0xffd23f, 2, 0.3);
+        this.audio.play('pickup', d.pos);
+        if (d.collectedBy === this.player) {
+          this.hud.addCashEvent(`recovered  $${d.amount.toLocaleString()}`);
+        }
+      }
+      d.dispose();
+      this.cashDrops.splice(i, 1);
+    }
+    for (const bot of this.bots) this.runBotVaultChannel(bot);
+    this.updatePlayerInteract();
+  }
+
+  /** Drive the local player's vault channel + buy station from E / B keys. */
+  private updatePlayerInteract() {
+    const p = this.player;
+    if (!p || !this.cashRules) return;
+    if (!p.alive) {
+      p.depositChannelStart = 0;
+      if (this.buyMenu.isOpen) this.buyMenu.close();
+      this.hud.setPrompt('');
+      return;
+    }
+
+    // --- buy station ---
+    const atBuy = this.buyStations.some((b) => b.team === p.team && b.containsActor(p));
+    if (this.buyMenu.isOpen) {
+      if (this.input.keyPressed('KeyB') || !atBuy) {
+        this.buyMenu.close();
+      } else {
+        for (let i = 0; i < SHOP_ITEMS.length; i++) {
+          if (this.input.keyPressed('Digit' + (i + 1))) this.tryBuy(SHOP_ITEMS[i]);
+        }
+      }
+    } else if (atBuy && this.input.keyPressed('KeyB')) {
+      this.openBuyMenu();
+    }
+
+    // --- vault deposit / steal channel ---
+    const ownVault = this.vaults.find((v) => v.team === p.team && v.containsActor(p));
+    const enemyVault = this.vaults.find((v) => v.team !== p.team && v.containsActor(p));
+    const canDeposit = !!ownVault && p.carried > 0;
+    const canSteal = !!enemyVault;
+
+    if ((canDeposit || canSteal) && this.input.key('KeyE')) {
+      if (p.depositChannelStart === 0) p.depositChannelStart = this.time;
+      const prog = (this.time - p.depositChannelStart) / DEPOSIT_TIME;
+      if (prog >= 1) {
+        p.depositChannelStart = 0;
+        if (ownVault) this.doDeposit(p); else this.doSteal(p);
+      } else {
+        const pct = Math.floor(prog * 100);
+        this.hud.setPrompt(ownVault ? `DEPOSITING…  ${pct}%` : `RAIDING VAULT…  ${pct}%`);
+      }
+    } else {
+      p.depositChannelStart = 0;
+      if (this.buyMenu.isOpen) this.hud.setPrompt('');
+      else if (canDeposit) this.hud.setPrompt(`HOLD  E  TO DEPOSIT  $${Math.floor(p.carried).toLocaleString()}`);
+      else if (enemyVault) this.hud.setPrompt('HOLD  E  TO RAID THE ENEMY VAULT');
+      else if (atBuy) this.hud.setPrompt('PRESS  B  TO BUY');
+      else this.hud.setPrompt('');
+    }
+  }
+
+  private doDeposit(a: Actor) {
+    const amt = this.cashRules!.deposit(a);
+    if (amt <= 0) return;
+    this.audio.play('pickupbig', a.position);
+    this.effects.flash(a.position.clone(), TEAM_COLORS[a.team], 2.6, 0.35);
+    this.hud.addCashEvent(`${a.name} banked  $${amt.toLocaleString()}`);
+  }
+
+  private doSteal(a: Actor) {
+    const amt = this.cashRules!.steal(a);
+    if (amt <= 0) return;
+    this.audio.play('pickupbig', a.position);
+    this.effects.flash(a.position.clone(), 0xffd23f, 2.6, 0.35);
+    this.hud.addCashEvent(`${a.name} raided  $${amt.toLocaleString()}  from ${teamName(enemyOf(a.team))}`);
+  }
+
+  /** Run a bot's vault deposit/steal channel when its brain wants to. */
+  private runBotVaultChannel(bot: Bot) {
+    if (!bot.alive || !this.cashRules) { bot.depositChannelStart = 0; return; }
+    const ownVault = this.vaults.find((v) => v.team === bot.team && v.containsActor(bot));
+    const enemyVault = this.vaults.find((v) => v.team !== bot.team && v.containsActor(bot));
+    const canDeposit = !!ownVault && bot.carried > 0;
+    const canSteal = !!enemyVault;
+    if (bot.wantVaultInteract && (canDeposit || canSteal)) {
+      if (bot.depositChannelStart === 0) bot.depositChannelStart = this.time;
+      if (this.time - bot.depositChannelStart >= DEPOSIT_TIME) {
+        bot.depositChannelStart = 0;
+        if (ownVault) this.doDeposit(bot); else this.doSteal(bot);
+      }
+    } else {
+      bot.depositChannelStart = 0;
+    }
+  }
+
+  /** A bot equips one weapon from the team bank shortly after spawning. */
+  private botAutoBuy(bot: Actor) {
+    if (!this.cashRules || bot.loadout.size > 1) return;
+    const bank = this.cashRules.bank;
+    for (const id of ['shard', 'railgun', 'rocket']) {
+      const item = SHOP_ITEMS.find((s) => s.weaponId === id);
+      if (!item) continue;
+      if (bank[bot.team] >= item.cost + 4000) { // leave a reserve for the team
+        bank[bot.team] -= item.cost;
+        bot.loadout.add(id);
+        bot.inventory.add(id);
+        bot.ammo[id] = WEAPONS[id].startAmmo;
+        return;
+      }
+    }
+  }
+
+  private openBuyMenu() {
+    const p = this.player!;
+    this.buyMenu.show({ bank: this.cashRules!.bank[p.team] ?? 0, owned: p.loadout });
+  }
+
+  private tryBuy(item: ShopItem) {
+    const p = this.player;
+    if (!p || p.team === 0) return;
+    if (item.kind === 'weapon' && item.weaponId && p.loadout.has(item.weaponId)) return;
+    // online: the server is authoritative — just request the purchase
+    if (this.mode === 'online') {
+      this.net?.send({ t: 'buy', itemId: item.id });
+      return;
+    }
+    if (!this.cashRules) return;
+    const bank = this.cashRules.bank;
+    if ((bank[p.team] ?? 0) < item.cost) {
+      this.audio.play('hitmarker');
+      return;
+    }
+    bank[p.team] -= item.cost;
+    this.grantPurchase(p, item);
+    this.audio.play('pickup');
+    this.hud.addCashEvent(`${p.name} bought ${item.label}  −$${item.cost.toLocaleString()}`);
+    this.openBuyMenu(); // re-render with the new balance / ownership
+  }
+
+  private grantPurchase(p: Player, item: ShopItem) {
+    if (item.kind === 'weapon' && item.weaponId) {
+      p.loadout.add(item.weaponId);
+      p.inventory.add(item.weaponId);
+      p.ammo[item.weaponId] = WEAPONS[item.weaponId].startAmmo;
+    } else if (item.kind === 'armor') {
+      p.armor = Math.min(p.maxArmor, p.armor + (item.amount ?? 75));
+    } else if (item.kind === 'ammo') {
+      p.giveAmmoAll();
+    }
+  }
+
+  /** Drop a briefcase of money at an actor's position (death drop). */
+  spawnCashDrop(center: THREE.Vector3, amount: number) {
+    const feet = center.clone();
+    feet.y -= ACTOR_FEET_OFFSET;
+    this.cashDrops.push(new CashDrop(this, amount, feet));
+  }
+
+  // ===================================================================
+  //  online play — rooms, lobby and matches
+  // ===================================================================
+
+  /** Connect, then create a room with the given lobby config. */
+  async createRoom(url: string, name: string, config: LobbyConfig) {
+    const net = await this.connectServer(url, name);
+    net?.send({ t: 'createRoom', name: this.onlineName, config });
+  }
+
+  /** Connect, then join an existing room by invite code. */
+  async joinRoom(url: string, name: string, code: string) {
+    const net = await this.connectServer(url, name);
+    net?.send({ t: 'joinRoom', code: code.toUpperCase().trim(), name: this.onlineName });
+  }
+
+  private async connectServer(url: string, name: string): Promise<NetClient | null> {
     this.clearMatch();
     this.onlineUrl = url;
     this.onlineName = (name || 'PLAYER').toUpperCase().slice(0, 14);
     this.menu.showConnecting();
-
     const net = new NetClient();
     net.onMessage = (m) => this.handleNet(m);
     net.onClose = () => this.onNetClose();
     try {
-      await net.connect(url, this.onlineName);
+      await net.connect(url);
     } catch (e) {
-      this.menu.showOnline(e instanceof Error ? e.message : 'connection failed');
-      return;
+      this.menu.showOnlineHub(e instanceof Error ? e.message : 'connection failed');
+      return null;
     }
     this.net = net;
-    // setup completes when the 'welcome' message arrives
+    this.mode = 'online';
+    return net;
+  }
+
+  // ---- lobby messaging (wired to the Menu's lobby screen) ----
+  lobbySetReady(ready: boolean) { this.net?.send({ t: 'lobbySetReady', ready }); }
+  lobbySelectTeam(team: 1 | 2) { this.net?.send({ t: 'lobbySelectTeam', team }); }
+  lobbyConfig(config: LobbyConfig) { this.net?.send({ t: 'lobbyConfig', config }); }
+  lobbyKick(id: number) { this.net?.send({ t: 'lobbyKick', id }); }
+  lobbyStart() { this.net?.send({ t: 'lobbyStart' }); }
+  leaveOnline() {
+    this.net?.send({ t: 'leaveRoom' });
+    this.net?.close();
+    this.net = null;
+    this.clearMatch();
+    this.state = 'menu';
+    this.hud.setVisible(false);
+    this.audio.setMuffled(false);
+    this.menu.showOnlineHub();
   }
 
   private handleNet(msg: ServerMsg) {
     switch (msg.t) {
-      case 'welcome':      this.onWelcome(msg); break;
-      case 'state':        this.onNetState(msg); break;
-      case 'playerJoined': this.addRemote(msg.player); break;
-      case 'playerLeft':   this.removeRemote(msg.id); break;
-      case 'fire':         this.onRemoteFire(msg); break;
-      case 'kill':         this.onNetKill(msg); break;
-      case 'spawn':        this.onNetSpawn(msg); break;
-      case 'matchOver':    this.onNetMatchOver(msg); break;
-      case 'matchReset':   this.onNetMatchReset(msg); break;
+      case 'roomJoined':    this.onRoomJoined(msg); break;
+      case 'lobbyState':    this.onLobbyState(msg); break;
+      case 'roomError':     this.menu.showOnlineHub(msg.message); break;
+      case 'kicked':        this.onKicked(); break;
+      case 'matchStart':    this.onMatchStart(msg); break;
+      case 'state':         this.onNetState(msg); break;
+      case 'playerLeft':    this.removeRemote(msg.id); break;
+      case 'fire':          this.onRemoteFire(msg); break;
+      case 'kill':          this.onNetKill(msg); break;
+      case 'spawn':         this.onNetSpawn(msg); break;
+      case 'matchOver':     this.onNetMatchOver(msg); break;
+      case 'matchReset':    this.onNetMatchReset(msg); break;
+      case 'cashSpawned':   this.onCashSpawned(msg); break;
+      case 'cashCollected': this.onCashCollected(msg); break;
+      case 'cashExpired':   this.onCashExpired(msg); break;
+      case 'bankUpdate':    this.onBankUpdate(msg); break;
+      case 'loadoutUpdate': this.onLoadoutUpdate(msg); break;
+      case 'cashEvent':     this.hud.addCashEvent(msg.text); break;
     }
   }
 
-  private onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
+  private onRoomJoined(msg: Extract<ServerMsg, { t: 'roomJoined' }>) {
+    this.localId = msg.youId;
+    this.roomCode = msg.code;
+  }
+
+  private onLobbyState(msg: Extract<ServerMsg, { t: 'lobbyState' }>) {
+    if (this.state === 'playing') return; // a late lobby frame after match start
+    this.menu.showLobby(msg.lobby, this.localId);
+  }
+
+  private onKicked() {
+    this.net?.close();
+    this.net = null;
+    this.clearMatch();
+    this.state = 'menu';
+    this.menu.showOnlineHub('you were removed from the room');
+  }
+
+  private onMatchStart(msg: Extract<ServerMsg, { t: 'matchStart' }>) {
+    this.clearMatch();
     this.mode = 'online';
-    this.localId = msg.id;
+    this.gameMode = msg.match.mode;
+    this.localId = msg.youId;
     this.time = 0;
     this.firstBloodDone = false;
-    this.match = new Match({
-      botCount: 0, fragLimit: msg.match.fragLimit,
+    this.ensureArena(this.gameMode);
+
+    const cfg: MatchConfig = {
+      mode: this.gameMode, botCount: 0, fragLimit: msg.match.fragLimit,
       timeLimitSec: msg.match.timeLeft, difficulty: 'skilled',
-    });
-    this.match.timeLeft = msg.match.timeLeft;
+      startMoney: msg.match.bank1, winTarget: msg.match.winTarget,
+    };
+    if (this.gameMode === 'cashraid') {
+      const rules = new CashRaidRules(cfg);
+      rules.bank[1] = msg.match.bank1;
+      rules.bank[2] = msg.match.bank2;
+      rules.timeLeft = msg.match.timeLeft;
+      this.cashRules = rules;
+      this.match = rules;
+      this.buildCashZones();
+    } else {
+      this.cashRules = null;
+      this.match = new Match(cfg);
+      this.match.timeLeft = msg.match.timeLeft;
+    }
 
     const me = msg.players.find((p) => p.id === this.localId);
     const feet = me
       ? new THREE.Vector3(me.x, me.y, me.z)
       : this.arena.spawnPoints[0].clone();
-    this.player = new Player(this, this.onlineName, feet, this.camera);
+    this.player = new Player(this, me?.name ?? this.onlineName, feet, this.camera);
+    this.player.team = me?.team ?? 0;
+    this.player.loadout = this.gameMode === 'cashraid'
+      ? new Set(['pulse']) : new Set(WEAPON_ORDER);
     this.actors.push(this.player);
-    this.player.respawn(feet); // populates the weapon inventory
+    this.player.respawn(feet);
 
-    for (const np of msg.players) {
-      if (np.id !== this.localId) this.addRemote(np);
-    }
+    for (const np of msg.players) if (np.id !== this.localId) this.addRemote(np);
     this.physics.step();
 
     this.state = 'playing';
@@ -618,6 +998,7 @@ export class Game {
   private addRemote(np: NetPlayer) {
     if (np.id === this.localId || this.remotes.has(np.id)) return;
     const r = new RemotePlayer(this, np);
+    r.team = np.team;
     this.remotes.set(np.id, r);
     this.actors.push(r);
     this.scene.add(r.mesh);
@@ -634,6 +1015,10 @@ export class Game {
 
   private onNetState(msg: Extract<ServerMsg, { t: 'state' }>) {
     this.match.timeLeft = msg.match.timeLeft;
+    if (this.cashRules) {
+      this.cashRules.bank[1] = msg.match.bank1;
+      this.cashRules.bank[2] = msg.match.bank2;
+    }
     for (const np of msg.players) {
       if (np.id === this.localId) {
         const p = this.player;
@@ -642,6 +1027,7 @@ export class Game {
         p.armor = np.armor;
         p.frags = np.frags;
         p.deaths = np.deaths;
+        p.carried = np.carried;
         if (!np.alive && p.alive) {
           p.alive = false;
           p.deathTime = this.time;
@@ -667,6 +1053,54 @@ export class Game {
       if (r) this.effects.flash(new THREE.Vector3(msg.x, msg.y + 1, msg.z), r.colorHex, 2, 0.3);
       this.audio.play('spawn', feet);
     }
+  }
+
+  // ---- Cash Raid network events ----
+
+  private onCashSpawned(msg: Extract<ServerMsg, { t: 'cashSpawned' }>) {
+    this.cashDrops.push(new CashDrop(
+      this, msg.amount, new THREE.Vector3(msg.x, msg.y, msg.z),
+      { id: msg.dropId, passive: true },
+    ));
+  }
+
+  private onCashCollected(msg: Extract<ServerMsg, { t: 'cashCollected' }>) {
+    const i = this.cashDrops.findIndex((d) => d.id === msg.dropId);
+    if (i < 0) return;
+    const d = this.cashDrops[i];
+    this.effects.flash(d.pos.clone().setY(d.pos.y + 0.6), 0xffd23f, 2, 0.3);
+    this.audio.play('pickup', d.pos);
+    if (msg.byId === this.localId) this.hud.addCashEvent(`recovered  $${msg.amount.toLocaleString()}`);
+    d.dispose();
+    this.cashDrops.splice(i, 1);
+  }
+
+  private onCashExpired(msg: Extract<ServerMsg, { t: 'cashExpired' }>) {
+    const i = this.cashDrops.findIndex((d) => d.id === msg.dropId);
+    if (i < 0) return;
+    this.cashDrops[i].dispose();
+    this.cashDrops.splice(i, 1);
+  }
+
+  private onBankUpdate(msg: Extract<ServerMsg, { t: 'bankUpdate' }>) {
+    if (!this.cashRules) return;
+    this.cashRules.bank[1] = msg.bank1;
+    this.cashRules.bank[2] = msg.bank2;
+    if (this.buyMenu.isOpen) this.openBuyMenu();
+  }
+
+  private onLoadoutUpdate(msg: Extract<ServerMsg, { t: 'loadoutUpdate' }>) {
+    const p = this.player;
+    if (!p) return;
+    for (const id of msg.weapons) {
+      p.loadout.add(id);
+      if (!p.inventory.has(id)) {
+        p.inventory.add(id);
+        p.ammo[id] = WEAPONS[id].startAmmo;
+      }
+    }
+    p.armor = Math.max(p.armor, msg.armor);
+    if (this.buyMenu.isOpen) this.openBuyMenu();
   }
 
   private onRemoteFire(msg: Extract<ServerMsg, { t: 'fire' }>) {
@@ -741,16 +1175,36 @@ export class Game {
     this.input.exitLock();
     this.audio.setMuffled(true);
     this.hud.setVisible(false);
-    const winner = msg.winnerId ? this.actorByNetId(msg.winnerId) : null;
-    this.audio.announce(winner === this.player ? 'You win' : 'Match over');
-    this.menu.showEnd(this.match.ranking(this.actors), winner, this.player!);
+    this.buyMenu.close();
+    if (this.gameMode === 'cashraid' && this.cashRules) {
+      this.cashRules.winner = msg.winnerTeam;
+      const won = !!this.player && msg.winnerTeam === this.player.team;
+      this.audio.announce(won ? 'You win' : msg.winnerTeam === 0 ? 'Draw' : 'Match over');
+      this.menu.showCashRaidEnd(this.cashRules, this.actors, this.player!);
+    } else {
+      const winner = msg.winnerId ? this.actorByNetId(msg.winnerId) : null;
+      this.audio.announce(winner === this.player ? 'You win' : 'Match over');
+      this.menu.showEnd(this.match.ranking(this.actors), winner, this.player!);
+    }
   }
 
   private onNetMatchReset(msg: Extract<ServerMsg, { t: 'matchReset' }>) {
     this.match.timeLeft = msg.match.timeLeft;
     this.match.over = false;
     this.firstBloodDone = false;
+    if (this.cashRules) {
+      this.cashRules.bank[1] = msg.match.bank1;
+      this.cashRules.bank[2] = msg.match.bank2;
+      this.cashRules.winner = 0;
+      for (const d of this.cashDrops) d.dispose();
+      this.cashDrops = [];
+    }
+    for (const a of this.actors) {
+      a.moneyBanked = 0; a.moneyStolen = 0; a.carried = 0;
+      if (this.gameMode === 'cashraid') a.loadout = new Set(['pulse']);
+    }
     if (this.player) { this.player.spree = 0; this.player.multiKill = 0; }
+    this.buyMenu.close();
     if (this.state === 'matchover') {
       this.state = 'playing';
       this.menu.hideAll();
@@ -768,7 +1222,7 @@ export class Game {
     this.hud.setVisible(false);
     this.hud.hideRespawn();
     this.audio.setMuffled(false);
-    this.menu.showOnline('disconnected from server');
+    this.menu.showOnlineHub('disconnected from server');
   }
 
   private actorByNetId(id: number): Actor | null {
@@ -778,7 +1232,10 @@ export class Game {
 
   private updateOnline(dt: number) {
     this.time += dt;
-    if (this.input.keyPressed('Escape')) { this.pause(); return; }
+    if (this.input.keyPressed('Escape')) {
+      if (this.buyMenu.isOpen) this.buyMenu.close();
+      else { this.pause(); return; }
+    }
 
     const player = this.player!;
     player.update(dt);
@@ -793,6 +1250,13 @@ export class Game {
     const renderTime = performance.now();
     for (const r of this.remotes.values()) r.tick(renderTime, dt);
 
+    if (this.gameMode === 'cashraid') {
+      for (const v of this.vaults) v.update(dt);
+      for (const b of this.buyStations) b.update(dt);
+      for (const d of this.cashDrops) d.update(dt);
+      this.updateOnlineCashInteract();
+    }
+
     this.inputAccum += dt;
     if (this.inputAccum >= 0.05 && this.net) {
       this.inputAccum = 0;
@@ -806,8 +1270,38 @@ export class Game {
     this.camera.getWorldDirection(fwd);
     this.audio.updateListener(this.camera.position, fwd);
 
-    this.hud.toggleScoreboard(this.input.key('Tab'), this.match, this.actors, player);
-    this.hud.update(player, this.match, this.actors, this.time);
+    this.hud.toggleScoreboard(this.input.key('Tab'), this.match, this.actors, player, this.cashRules);
+    this.hud.update(player, this.match, this.actors, this.time, this.cashRules);
+  }
+
+  /** Online Cash Raid: buy menu + contextual prompts (server runs the channel). */
+  private updateOnlineCashInteract() {
+    const p = this.player;
+    if (!p) return;
+    if (!p.alive) {
+      if (this.buyMenu.isOpen) this.buyMenu.close();
+      this.hud.setPrompt('');
+      return;
+    }
+    const atBuy = this.buyStations.some((b) => b.team === p.team && b.containsActor(p));
+    if (this.buyMenu.isOpen) {
+      if (this.input.keyPressed('KeyB') || !atBuy) this.buyMenu.close();
+      else for (let i = 0; i < SHOP_ITEMS.length; i++) {
+        if (this.input.keyPressed('Digit' + (i + 1))) this.tryBuy(SHOP_ITEMS[i]);
+      }
+    } else if (atBuy && this.input.keyPressed('KeyB')) {
+      this.openBuyMenu();
+    }
+
+    const ownVault = this.vaults.find((v) => v.team === p.team && v.containsActor(p));
+    const enemyVault = this.vaults.find((v) => v.team !== p.team && v.containsActor(p));
+    if (this.buyMenu.isOpen) this.hud.setPrompt('');
+    else if (ownVault && p.carried > 0 && this.input.key('KeyE')) this.hud.setPrompt('DEPOSITING…');
+    else if (enemyVault && this.input.key('KeyE')) this.hud.setPrompt('RAIDING VAULT…');
+    else if (ownVault && p.carried > 0) this.hud.setPrompt(`HOLD  E  TO DEPOSIT  $${Math.floor(p.carried).toLocaleString()}`);
+    else if (enemyVault) this.hud.setPrompt('HOLD  E  TO RAID THE ENEMY VAULT');
+    else if (atBuy) this.hud.setPrompt('PRESS  B  TO BUY');
+    else this.hud.setPrompt('');
   }
 
   private sendInput() {
@@ -822,11 +1316,14 @@ export class Game {
       yaw: p.yaw, pitch: p.pitch,
       vx: p.velocity.x, vy: p.velocity.y, vz: p.velocity.z,
       weapon: p.currentWeapon, anim,
+      interact: this.gameMode === 'cashraid' && p.alive && this.input.key('KeyE'),
     });
   }
 
   private applyDamageOnline(target: Actor, info: DamageInfo) {
     if (target instanceof RemotePlayer) {
+      // Cash Raid: don't report friendly fire — the server rejects it anyway
+      if (this.gameMode === 'cashraid' && this.player && target.team === this.player.team) return;
       this.net?.send({
         t: 'hit', targetId: target.netId,
         amount: info.amount, weapon: info.weaponId, headshot: info.headshot,
@@ -848,6 +1345,8 @@ export class Game {
     let hitSomeone = false;
     for (const a of this.actors) {
       if (!a.alive) continue;
+      if (this.gameMode === 'cashraid' && a instanceof RemotePlayer &&
+          this.player && a.team === this.player.team) continue;
       const d = a.position.distanceTo(center);
       if (d > radius) continue;
       const falloff = 1 - d / radius;

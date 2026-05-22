@@ -13,6 +13,9 @@
   --good: #6dff8a;
   --text: #cfe6f0;
   --muted: #6d8090;
+  --team-blue: #36e0ff;
+  --team-orange: #ff9a3c;
+  --money: #ffd23f;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -195,6 +198,9 @@ button.primary {
 .kf-row .victim { color: var(--text); }
 .kf-row .you { color: var(--orange); font-weight: 700; }
 .kf-row .wpn { color: var(--muted); }
+.kf-row .team-1 { color: var(--team-blue); }
+.kf-row .team-2 { color: var(--team-orange); }
+.kf-row .you.team-1, .kf-row .you.team-2 { font-weight: 700; text-shadow: 0 0 8px currentColor; }
 @keyframes kfin { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; } }
 
 /* respawn overlay */
@@ -275,6 +281,146 @@ input[type=range] { width: 200px; accent-color: var(--accent); cursor: pointer; 
 }
 .help b { color: var(--text); }
 .credits { margin-top: 18px; font-size: 11px; color: #44525f; text-align: center; max-width: 560px; line-height: 1.7; }
+
+/* ============================================================
+   CASH RAID — HUD + buy menu
+   ============================================================ */
+#banks { font-size: 13px; letter-spacing: 1px; margin-top: 4px; }
+#banks .bk { padding: 0 7px; color: var(--muted); }
+#banks .bk.t1 { color: var(--team-blue); font-weight: 700; }
+#banks .bk.t2 { color: var(--team-orange); font-weight: 700; }
+#banks .bk.vs { color: var(--muted); padding: 0 2px; }
+#banks .bk.tgt { color: var(--money); }
+
+#carried {
+  position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%);
+  font-size: 21px; font-weight: 700; letter-spacing: 2px;
+  color: var(--money); text-shadow: 0 0 16px var(--money);
+}
+#carried.empty { opacity: 0.35; text-shadow: none; }
+#carried.heavy { animation: heavy 0.9s ease-in-out infinite; }
+@keyframes heavy {
+  0%, 100% { text-shadow: 0 0 16px var(--money); }
+  50% { text-shadow: 0 0 30px var(--danger); color: #fff; }
+}
+
+#prompt {
+  position: absolute; left: 50%; bottom: 132px; transform: translateX(-50%);
+  font-size: 14px; letter-spacing: 2px; color: var(--text);
+  background: rgba(10,14,22,0.78); border: 1px solid var(--accent-dim);
+  padding: 7px 16px; white-space: nowrap;
+}
+
+#cashfeed {
+  position: absolute; left: 24px; top: 92px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
+.cf-row {
+  background: rgba(10,14,22,0.7);
+  border-left: 3px solid var(--money);
+  padding: 5px 12px; font-size: 13px; letter-spacing: 1px;
+  color: var(--money); animation: kfin 0.2s ease-out;
+}
+
+/* scoreboard team headers (also reused on the end screen) */
+.sb-team {
+  margin: 14px 0 6px; padding: 5px 6px;
+  font-size: 13px; letter-spacing: 3px; font-weight: 700;
+  display: flex; justify-content: space-between;
+  border-bottom: 2px solid currentColor;
+}
+.sb-team.t1 { color: var(--team-blue); }
+.sb-team.t2 { color: var(--team-orange); }
+.sb-team span { color: var(--money); }
+
+/* buy menu overlay */
+#buymenu {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.buy-panel {
+  background: rgba(10,14,22,0.95);
+  border: 1px solid var(--accent-dim);
+  padding: 20px 24px; min-width: 460px;
+}
+.buy-head {
+  font-size: 15px; letter-spacing: 4px; color: var(--accent);
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 14px; text-transform: uppercase;
+}
+.buy-head .buy-bank { font-size: 13px; color: var(--money); letter-spacing: 2px; }
+.buy-item {
+  display: grid; grid-template-columns: 28px 1fr 1fr 90px;
+  align-items: center; gap: 8px;
+  padding: 9px 8px; font-size: 14px; border-bottom: 1px solid #1c2636;
+}
+.buy-item .bi-key {
+  text-align: center; color: #07121a; background: var(--accent);
+  font-weight: 700; border-radius: 3px;
+}
+.buy-item .bi-label { color: var(--text); letter-spacing: 1px; }
+.buy-item .bi-blurb { color: var(--muted); font-size: 12px; }
+.buy-item .bi-cost { text-align: right; color: var(--money); font-weight: 700; }
+.buy-item.owned { opacity: 0.45; }
+.buy-item.owned .bi-cost { color: var(--good); }
+.buy-item.broke .bi-cost { color: var(--danger); }
+.buy-item.broke .bi-key { background: #2a3340; color: var(--muted); }
+.buy-foot {
+  margin-top: 12px; font-size: 11px; color: var(--muted);
+  letter-spacing: 2px; text-align: center;
+}
+
+/* ============================================================
+   ONLINE — hub, create, join, lobby
+   ============================================================ */
+.form-error {
+  color: var(--danger); font-size: 13px; letter-spacing: 1px;
+  text-align: center; margin-top: 8px;
+}
+button.mini {
+  padding: 4px 10px; font-size: 11px; letter-spacing: 1px;
+}
+.lobby-code {
+  font-size: 15px; letter-spacing: 3px; color: var(--muted);
+  margin-bottom: 16px; display: flex; align-items: center; gap: 12px;
+}
+.lobby-code b {
+  color: var(--money); font-size: 22px; letter-spacing: 6px;
+  text-shadow: 0 0 14px var(--money);
+}
+.lobby-teams { display: flex; gap: 16px; }
+.lobby-team {
+  flex: 1; border: 1px solid var(--accent-dim);
+  padding: 10px 12px; min-width: 220px;
+}
+.lobby-team h4 {
+  font-size: 12px; letter-spacing: 3px; margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.lobby-team.t1 { border-color: var(--team-blue); }
+.lobby-team.t1 h4 { color: var(--team-blue); }
+.lobby-team.t2 { border-color: var(--team-orange); }
+.lobby-team.t2 h4 { color: var(--team-orange); }
+.lobby-list { display: flex; flex-direction: column; gap: 4px; min-width: 360px; }
+.lm-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; font-size: 14px; background: rgba(13,22,35,0.6);
+}
+.lm-row.me { background: rgba(54,224,255,0.12); }
+.lm-name { flex: 1; letter-spacing: 1px; }
+.lm-host { color: var(--money); }
+.lm-ready { color: var(--good); font-size: 11px; letter-spacing: 1px; }
+.lm-wait { color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+.lm-kick {
+  padding: 2px 8px; font-size: 11px; color: var(--danger);
+  border-color: var(--danger);
+}
+.lm-empty { color: var(--muted); font-size: 12px; padding: 6px 8px; }
+.lobby-settings {
+  margin-top: 14px; font-size: 12px; color: var(--muted);
+  letter-spacing: 1px; text-align: center;
+}
 
 /* loading */
 #loading {

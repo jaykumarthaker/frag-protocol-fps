@@ -9,6 +9,8 @@ import type { MatchConfig } from '../core/types';
 export class Bot extends Actor {
   private brain: BotBrain;
   private robot: RobotInstance;
+  /** Cash Raid: true when the bot is channelling a vault deposit / steal. */
+  wantVaultInteract = false;
 
   constructor(
     game: Game, name: string, colorHex: number,
@@ -42,8 +44,9 @@ export class Bot extends Actor {
   }
 
   update(dt: number) {
-    if (!this.alive) return;
+    if (!this.alive) { this.wantVaultInteract = false; return; }
     const intent = this.brain.update(dt);
+    this.wantVaultInteract = this.brain.wantInteract;
     this.move(dt, intent.wishDir, intent.jump, intent.dodge);
   }
 

@@ -59,6 +59,10 @@ export class RemotePlayer extends Actor {
     this.armor = np.armor;
     this.frags = np.frags;
     this.deaths = np.deaths;
+    this.team = np.team;
+    this.carried = np.carried;
+    this.moneyBanked = np.moneyBanked;
+    this.moneyStolen = np.moneyStolen;
     this.anim = np.anim;
     this.currentWeapon = np.weapon;
     if (this.alive !== np.alive) {

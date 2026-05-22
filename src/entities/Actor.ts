@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Game } from '../core/Game';
-import type { DamageInfo } from '../core/types';
+import type { DamageInfo, Team } from '../core/types';
 import { WEAPONS, WEAPON_ORDER } from '../weapons/Weapons';
 
 // --- movement tuning (arena-shooter feel: fast, floaty, twitchy) ---
@@ -69,6 +69,12 @@ export class Actor {
   ammo: Record<string, number> = {};
   currentWeapon = 'shard';
   weaponReadyAt = 0;
+  /**
+   * Weapons granted on (re)spawn. Empty = every weapon (deathmatch default).
+   * In Cash Raid this starts as just the basic weapon and grows with
+   * purchases, so bought guns survive death.
+   */
+  loadout = new Set<string>();
 
   // scoring / kill-streak bookkeeping
   frags = 0;
@@ -77,6 +83,17 @@ export class Actor {
   multiKill = 0;
   spree = 0;
   lastDamagedAt = -99;
+
+  // --- Cash Raid (team / economy) — inert in deathmatch ---
+  /** 0 = no team (deathmatch); 1 / 2 are the Cash Raid teams. */
+  team: Team = 0;
+  /** Money currently carried; dropped (partially) on death. */
+  carried = 0;
+  /** Career stats for the Cash Raid scoreboard. */
+  moneyBanked = 0;
+  moneyStolen = 0;
+  /** game.time the in-vault deposit channel began (0 = not channelling). */
+  depositChannelStart = 0;
 
   private tmp = new THREE.Vector3();
 
@@ -131,13 +148,19 @@ export class Actor {
     this.dodgeTimer = 0;
     this.ampUntil = 0;
     this.invulnUntil = this.game.time + 2;
+    this.carried = 0;
+    this.depositChannelStart = 0;
 
     this.inventory.clear();
-    for (const id of WEAPON_ORDER) {
+    const granted = this.loadout.size > 0 ? this.loadout : WEAPON_ORDER;
+    for (const id of granted) {
       this.inventory.add(id);
       this.ammo[id] = WEAPONS[id].startAmmo;
     }
-    this.currentWeapon = 'shard';
+    // keep 'shard' as the default when owned (deathmatch), else first owned
+    this.currentWeapon = this.inventory.has('shard')
+      ? 'shard'
+      : WEAPON_ORDER.find((id) => this.inventory.has(id)) ?? 'shard';
     this.weaponReadyAt = this.game.time + 0.3;
   }
 

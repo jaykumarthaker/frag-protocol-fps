@@ -1,5 +1,12 @@
 import type { Actor } from '../entities/Actor';
-import type { MatchConfig } from '../core/types';
+import type { MatchConfig, GameMode, Team } from '../core/types';
+import type { CashRaidRules } from '../game/CashRaidRules';
+import type { LobbyConfig, LobbyState } from '../net/protocol';
+import { teamName } from '../game/teams';
+
+/** Cash Raid economy defaults used for offline / instant-action matches. */
+export const CASHRAID_START_MONEY = 20000;
+export const CASHRAID_WIN_TARGET = 100000;
 
 export interface GameSettings {
   sensitivity: number;
@@ -12,8 +19,24 @@ export interface MenuHandlers {
   onResume: () => void;
   onRestart: () => void;
   onMainMenu: () => void;
-  onConnectOnline: (url: string, name: string) => void;
+  onCreateRoom: (url: string, name: string, config: LobbyConfig) => void;
+  onJoinRoom: (url: string, name: string, code: string) => void;
+  onLeaveRoom: () => void;
+  onLobbyReady: (ready: boolean) => void;
+  onLobbySelectTeam: (team: 1 | 2) => void;
+  onLobbyConfig: (config: LobbyConfig) => void;
+  onLobbyKick: (id: number) => void;
+  onLobbyStart: () => void;
   settings: GameSettings;
+}
+
+/** Default lobby configuration used to seed the create-room form. */
+function defaultLobbyConfig(): LobbyConfig {
+  return {
+    mode: 'cashraid', maxPlayers: 8, durationSec: 900, botCount: 4,
+    fragLimit: 25, difficulty: 'skilled', startMoney: 20000,
+    winTarget: 100000, isPublic: true,
+  };
 }
 
 /** Front-end screens: main menu, pause overlay and match-over screen. */
@@ -22,11 +45,13 @@ export class Menu {
   private h: MenuHandlers;
 
   // match setup state
+  private mode: GameMode = 'deathmatch';
   private botCount = 4;
   private fragLimit = 20;
   private difficulty: MatchConfig['difficulty'] = 'skilled';
   private playerName = 'PLAYER';
   private serverUrl = 'ws://localhost:2567';
+  private lobbyCfg: LobbyConfig = defaultLobbyConfig();
 
   constructor(parent: HTMLElement, handlers: MenuHandlers) {
     this.h = handlers;
@@ -48,13 +73,20 @@ export class Menu {
       <div class="logo">FRAG&nbsp;<span class="x">PROTOCOL</span></div>
       <div class="tag">Browser Arena Combat</div>
       <div class="menu-card">
-        <h3>Instant Action — Deathmatch</h3>
+        <h3>Instant Action</h3>
+        <div class="field">
+          <label>Game mode</label>
+          <div class="seg" id="m-mode">
+            <button data-m="deathmatch">Deathmatch</button>
+            <button data-m="cashraid">Cash Raid</button>
+          </div>
+        </div>
         <div class="field">
           <label>Opponents</label>
           <input type="range" id="m-bots" min="1" max="7" step="1" value="${this.botCount}">
           <span class="val" id="m-bots-v">${this.botCount}</span>
         </div>
-        <div class="field">
+        <div class="field" id="m-frags-field">
           <label>Frag limit</label>
           <input type="range" id="m-frags" min="5" max="50" step="5" value="${this.fragLimit}">
           <span class="val" id="m-frags-v">${this.fragLimit}</span>
@@ -130,15 +162,40 @@ export class Menu {
     });
     paintDiff();
 
-    (s.querySelector('#m-start') as HTMLButtonElement).onclick = () => {
-      this.h.onStart({
+    const modeSeg = s.querySelector('#m-mode')!;
+    const fragsField = s.querySelector('#m-frags-field') as HTMLElement;
+    const startBtn = s.querySelector('#m-start') as HTMLButtonElement;
+    const paintMode = () => {
+      modeSeg.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('on', (b as HTMLElement).dataset.m === this.mode);
+      });
+      // frag limit is meaningless in Cash Raid
+      fragsField.style.display = this.mode === 'cashraid' ? 'none' : '';
+      startBtn.textContent = this.mode === 'cashraid' ? 'Raid' : 'Enter Arena';
+    };
+    modeSeg.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.mode = (b as HTMLElement).dataset.m as GameMode;
+        paintMode();
+      });
+    });
+    paintMode();
+
+    startBtn.onclick = () => {
+      const cfg: MatchConfig = {
+        mode: this.mode,
         botCount: this.botCount,
         fragLimit: this.fragLimit,
-        timeLimitSec: 600,
+        timeLimitSec: this.mode === 'cashraid' ? 900 : 600,
         difficulty: this.difficulty,
-      });
+      };
+      if (this.mode === 'cashraid') {
+        cfg.startMoney = CASHRAID_START_MONEY;
+        cfg.winTarget = CASHRAID_WIN_TARGET;
+      }
+      this.h.onStart(cfg);
     };
-    (s.querySelector('#m-online') as HTMLButtonElement).onclick = () => this.showOnline();
+    (s.querySelector('#m-online') as HTMLButtonElement).onclick = () => this.showOnlineHub();
     (s.querySelector('#m-credits') as HTMLButtonElement).onclick = () => this.showCredits();
   }
 
@@ -158,49 +215,249 @@ export class Menu {
     this.container.appendChild(s);
   }
 
-  showOnline(error?: string) {
+  private readonly inputCss =
+    'background:#0d1623;border:1px solid var(--accent-dim);color:var(--text);' +
+    'padding:7px 10px;font-family:inherit;font-size:14px;width:230px;';
+
+  /** Jump straight to the join screen with a code (used by invite links). */
+  openJoinWithCode(code: string) { this.showJoinRoom(code); }
+
+  /** Online hub: pick create-room or join-room. */
+  showOnlineHub(error?: string) {
     this.clear();
-    const inputStyle =
-      'background:#0d1623;border:1px solid var(--accent-dim);color:var(--text);' +
-      'padding:7px 10px;font-family:inherit;font-size:14px;width:230px;';
     const s = document.createElement('div');
     s.className = 'screen';
     s.innerHTML = `
       <div class="logo" style="font-size:46px;">PLAY <span class="x">ONLINE</span></div>
-      <div class="tag">Online Deathmatch</div>
+      <div class="tag">Rooms · Invite Codes · Cash Raid</div>
       <div class="menu-card" style="min-width:440px;">
-        <h3>Connect to a Server</h3>
-        <div class="field">
-          <label>Callsign</label>
-          <input type="text" id="o-name" maxlength="14" value="${this.playerName}" style="${inputStyle}">
-        </div>
-        <div class="field">
-          <label>Server</label>
-          <input type="text" id="o-url" value="${this.serverUrl}" style="${inputStyle}">
-        </div>
-        ${error ? `<div style="color:var(--danger);font-size:13px;letter-spacing:1px;` +
-          `text-align:center;margin-top:8px;">⚠ ${error}</div>` : ''}
+        <h3>Online Play</h3>
+        <div class="field"><label>Callsign</label>
+          <input type="text" id="o-name" maxlength="14" value="${this.playerName}" style="${this.inputCss}"></div>
+        <div class="field"><label>Server</label>
+          <input type="text" id="o-url" value="${this.serverUrl}" style="${this.inputCss}"></div>
+        ${error ? `<div class="form-error">⚠ ${error}</div>` : ''}
         <div class="btn-row">
-          <button class="primary" id="o-connect">Connect</button>
+          <button class="primary" id="o-create">Create Room</button>
+          <button id="o-join">Join Room</button>
           <button id="o-back">Back</button>
         </div>
       </div>
-      <div class="help">
-        Start the server first: <b>cd server</b> &nbsp;·&nbsp; <b>npm install</b>
-        &nbsp;·&nbsp; <b>npm start</b><br>
-        then connect to <b>ws://localhost:2567</b>. Players-only deathmatch — no bots.
+      <div class="help">Run a server: <b>cd server</b> &nbsp;·&nbsp; <b>npm install</b>
+        &nbsp;·&nbsp; <b>npm start</b></div>
+    `;
+    this.container.appendChild(s);
+    const grab = () => {
+      this.playerName = ((s.querySelector('#o-name') as HTMLInputElement).value.trim() || 'PLAYER').slice(0, 14);
+      this.serverUrl = (s.querySelector('#o-url') as HTMLInputElement).value.trim() || 'ws://localhost:2567';
+    };
+    (s.querySelector('#o-create') as HTMLButtonElement).onclick = () => { grab(); this.showCreateRoom(); };
+    (s.querySelector('#o-join') as HTMLButtonElement).onclick = () => { grab(); this.showJoinRoom(); };
+    (s.querySelector('#o-back') as HTMLButtonElement).onclick = () => this.showMain();
+  }
+
+  /** Settings fields shared by the create-room form. */
+  private configFields(cfg: LobbyConfig): string {
+    const min = Math.round(cfg.durationSec / 60);
+    return `
+      <div class="field"><label>Mode</label>
+        <div class="seg" id="c-mode">
+          <button data-m="cashraid">Cash Raid</button>
+          <button data-m="deathmatch">Deathmatch</button>
+        </div></div>
+      <div class="field"><label>Max players</label>
+        <input type="range" id="c-max" min="2" max="12" step="1" value="${cfg.maxPlayers}">
+        <span class="val" id="c-max-v">${cfg.maxPlayers}</span></div>
+      <div class="field"><label>Bots</label>
+        <input type="range" id="c-bots" min="0" max="10" step="1" value="${cfg.botCount}">
+        <span class="val" id="c-bots-v">${cfg.botCount}</span></div>
+      <div class="field"><label>Duration (min)</label>
+        <input type="range" id="c-dur" min="3" max="20" step="1" value="${min}">
+        <span class="val" id="c-dur-v">${min}</span></div>
+      <div class="field cr-only"><label>Win target ($k)</label>
+        <input type="range" id="c-target" min="20" max="500" step="10" value="${cfg.winTarget / 1000}">
+        <span class="val" id="c-target-v">${cfg.winTarget / 1000}</span></div>
+      <div class="field cr-only"><label>Start money ($k)</label>
+        <input type="range" id="c-money" min="0" max="100" step="5" value="${cfg.startMoney / 1000}">
+        <span class="val" id="c-money-v">${cfg.startMoney / 1000}</span></div>
+      <div class="field dm-only"><label>Frag limit</label>
+        <input type="range" id="c-frag" min="5" max="60" step="5" value="${cfg.fragLimit}">
+        <span class="val" id="c-frag-v">${cfg.fragLimit}</span></div>
+    `;
+  }
+
+  /** Wire the config-field inputs to mutate `cfg` in place. */
+  private wireConfig(s: HTMLElement, cfg: LobbyConfig) {
+    const range = (id: string, set: (v: number) => void) => {
+      const el = s.querySelector('#' + id) as HTMLInputElement | null;
+      const v = s.querySelector('#' + id + '-v');
+      if (!el) return;
+      el.oninput = () => { set(+el.value); if (v) v.textContent = el.value; };
+    };
+    range('c-max', (v) => { cfg.maxPlayers = v; });
+    range('c-bots', (v) => { cfg.botCount = v; });
+    range('c-dur', (v) => { cfg.durationSec = v * 60; });
+    range('c-target', (v) => { cfg.winTarget = v * 1000; });
+    range('c-money', (v) => { cfg.startMoney = v * 1000; });
+    range('c-frag', (v) => { cfg.fragLimit = v; });
+    const modeSeg = s.querySelector('#c-mode');
+    const paint = () => {
+      modeSeg?.querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', (b as HTMLElement).dataset.m === cfg.mode));
+      s.querySelectorAll('.cr-only').forEach((e) =>
+        ((e as HTMLElement).style.display = cfg.mode === 'cashraid' ? '' : 'none'));
+      s.querySelectorAll('.dm-only').forEach((e) =>
+        ((e as HTMLElement).style.display = cfg.mode === 'deathmatch' ? '' : 'none'));
+    };
+    modeSeg?.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        cfg.mode = (b as HTMLElement).dataset.m as GameMode;
+        paint();
+      });
+    });
+    paint();
+  }
+
+  showCreateRoom(error?: string) {
+    this.clear();
+    const cfg = this.lobbyCfg;
+    const s = document.createElement('div');
+    s.className = 'screen';
+    s.innerHTML = `
+      <div class="logo" style="font-size:42px;">CREATE <span class="x">ROOM</span></div>
+      <div class="menu-card" style="min-width:470px;">
+        <h3>Room Settings</h3>
+        ${this.configFields(cfg)}
+        <div class="field"><label>Lobby</label>
+          <div class="seg" id="c-pub">
+            <button data-p="1">Public</button><button data-p="0">Private</button>
+          </div></div>
+        ${error ? `<div class="form-error">⚠ ${error}</div>` : ''}
+        <div class="btn-row">
+          <button class="primary" id="c-go">Create Room</button>
+          <button id="c-back">Back</button>
+        </div>
       </div>
     `;
     this.container.appendChild(s);
+    this.wireConfig(s, cfg);
+    const pub = s.querySelector('#c-pub')!;
+    const paintPub = () => pub.querySelectorAll('button').forEach((b) =>
+      b.classList.toggle('on', ((b as HTMLElement).dataset.p === '1') === cfg.isPublic));
+    pub.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      cfg.isPublic = (b as HTMLElement).dataset.p === '1';
+      paintPub();
+    }));
+    paintPub();
+    (s.querySelector('#c-go') as HTMLButtonElement).onclick = () =>
+      this.h.onCreateRoom(this.serverUrl, this.playerName, { ...cfg });
+    (s.querySelector('#c-back') as HTMLButtonElement).onclick = () => this.showOnlineHub();
+  }
 
-    const nameEl = s.querySelector('#o-name') as HTMLInputElement;
-    const urlEl = s.querySelector('#o-url') as HTMLInputElement;
-    (s.querySelector('#o-connect') as HTMLButtonElement).onclick = () => {
-      this.playerName = (nameEl.value.trim() || 'PLAYER').slice(0, 14);
-      this.serverUrl = urlEl.value.trim() || 'ws://localhost:2567';
-      this.h.onConnectOnline(this.serverUrl, this.playerName);
+  showJoinRoom(prefillCode = '', error?: string) {
+    this.clear();
+    const s = document.createElement('div');
+    s.className = 'screen';
+    s.innerHTML = `
+      <div class="logo" style="font-size:44px;">JOIN <span class="x">ROOM</span></div>
+      <div class="menu-card" style="min-width:420px;">
+        <h3>Enter an Invite Code</h3>
+        <div class="field"><label>Callsign</label>
+          <input type="text" id="j-name" maxlength="14" value="${this.playerName}" style="${this.inputCss}"></div>
+        <div class="field"><label>Server</label>
+          <input type="text" id="j-url" value="${this.serverUrl}" style="${this.inputCss}"></div>
+        <div class="field"><label>Invite code</label>
+          <input type="text" id="j-code" maxlength="6" value="${prefillCode}"
+            style="${this.inputCss}text-transform:uppercase;letter-spacing:4px;"></div>
+        ${error ? `<div class="form-error">⚠ ${error}</div>` : ''}
+        <div class="btn-row">
+          <button class="primary" id="j-go">Join</button>
+          <button id="j-back">Back</button>
+        </div>
+      </div>
+    `;
+    this.container.appendChild(s);
+    (s.querySelector('#j-go') as HTMLButtonElement).onclick = () => {
+      this.playerName = ((s.querySelector('#j-name') as HTMLInputElement).value.trim() || 'PLAYER').slice(0, 14);
+      this.serverUrl = (s.querySelector('#j-url') as HTMLInputElement).value.trim() || 'ws://localhost:2567';
+      const code = (s.querySelector('#j-code') as HTMLInputElement).value.trim().toUpperCase();
+      this.h.onJoinRoom(this.serverUrl, this.playerName, code);
     };
-    (s.querySelector('#o-back') as HTMLButtonElement).onclick = () => this.showMain();
+    (s.querySelector('#j-back') as HTMLButtonElement).onclick = () => this.showOnlineHub();
+  }
+
+  /** Pre-match lobby — re-rendered on every server lobbyState. */
+  showLobby(lobby: LobbyState, localId: number) {
+    this.clear();
+    this.lobbyCfg = { ...lobby.config };
+    const isHost = lobby.hostId === localId;
+    const me = lobby.members.find((m) => m.id === localId);
+    const cash = lobby.config.mode === 'cashraid';
+    const link = `${location.origin}${location.pathname}?room=${lobby.code}`;
+
+    const memberRow = (m: LobbyState['members'][number]) => {
+      const tag = m.ready
+        ? '<span class="lm-ready">✓ READY</span>'
+        : '<span class="lm-wait">WAITING</span>';
+      const host = m.isHost ? '<span class="lm-host">★</span>' : '';
+      const kick = (isHost && m.id !== localId)
+        ? `<button class="lm-kick" data-kick="${m.id}">✕</button>` : '';
+      return `<div class="lm-row${m.id === localId ? ' me' : ''}">` +
+        `<span class="lm-name">${host}${m.name}</span>${tag}${kick}</div>`;
+    };
+
+    let roster: string;
+    if (cash) {
+      const col = (team: Team) => {
+        const rows = lobby.members.filter((m) => m.team === team).map(memberRow).join('');
+        return `<div class="lobby-team t${team}"><h4>${teamName(team)}</h4>` +
+          `${rows || '<div class="lm-empty">— empty —</div>'}</div>`;
+      };
+      roster = `<div class="lobby-teams">${col(1)}${col(2)}</div>`;
+    } else {
+      roster = `<div class="lobby-list">${lobby.members.map(memberRow).join('')}</div>`;
+    }
+
+    const c = lobby.config;
+    const settings = cash
+      ? `${c.botCount} bots · ${Math.round(c.durationSec / 60)} min · win $${c.winTarget / 1000}k`
+      : `${c.botCount} bots · ${Math.round(c.durationSec / 60)} min · ${c.fragLimit} frags`;
+
+    const s = document.createElement('div');
+    s.className = 'screen';
+    s.innerHTML = `
+      <div class="logo" style="font-size:38px;">
+        ${cash ? 'CASH RAID' : 'DEATHMATCH'} <span class="x">LOBBY</span></div>
+      <div class="lobby-code">INVITE CODE <b>${lobby.code}</b>
+        <button id="lb-copy" class="mini">copy link</button></div>
+      <div class="menu-card" style="min-width:540px;">
+        ${roster}
+        <div class="lobby-settings">${settings}</div>
+        <div class="btn-row">
+          ${cash ? `<button id="lb-t1">Join ${teamName(1)}</button>
+                    <button id="lb-t2">Join ${teamName(2)}</button>` : ''}
+          <button id="lb-ready" class="${me?.ready ? 'primary' : ''}">
+            ${me?.ready ? 'Ready ✓' : 'Ready Up'}</button>
+          ${isHost ? '<button class="primary" id="lb-start">Start Match</button>' : ''}
+          <button id="lb-leave">Leave</button>
+        </div>
+        ${isHost ? '' : '<div class="help" style="margin-top:6px;">waiting for the host…</div>'}
+      </div>
+    `;
+    this.container.appendChild(s);
+    const copyBtn = s.querySelector('#lb-copy') as HTMLButtonElement;
+    copyBtn.onclick = () => {
+      navigator.clipboard?.writeText(link).catch(() => {});
+      copyBtn.textContent = 'link copied!';
+    };
+    (s.querySelector('#lb-ready') as HTMLButtonElement).onclick =
+      () => this.h.onLobbyReady(!me?.ready);
+    (s.querySelector('#lb-leave') as HTMLButtonElement).onclick = () => this.h.onLeaveRoom();
+    s.querySelector('#lb-t1')?.addEventListener('click', () => this.h.onLobbySelectTeam(1));
+    s.querySelector('#lb-t2')?.addEventListener('click', () => this.h.onLobbySelectTeam(2));
+    s.querySelector('#lb-start')?.addEventListener('click', () => this.h.onLobbyStart());
+    s.querySelectorAll('[data-kick]').forEach((b) => b.addEventListener('click',
+      () => this.h.onLobbyKick(+(b as HTMLElement).dataset.kick!)));
   }
 
   // ---- credits --------------------------------------------------------
@@ -303,6 +560,53 @@ export class Menu {
         <div class="sb-row head"><div>PLAYER</div><div class="c">FRAGS</div>
           <div class="c">DEATHS</div><div class="c">SCORE</div></div>
         ${rows}
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="e-again">Play Again</button>
+        <button id="e-menu">Main Menu</button>
+      </div>
+    `;
+    this.container.appendChild(s);
+    (s.querySelector('#e-again') as HTMLButtonElement).onclick = () => this.h.onRestart();
+    (s.querySelector('#e-menu') as HTMLButtonElement).onclick = () => this.h.onMainMenu();
+  }
+
+  /** Cash Raid results: winning team, banks, MVP and per-player stats. */
+  showCashRaidEnd(rules: CashRaidRules, actors: Actor[], localPlayer: Actor) {
+    this.clear();
+    const s = document.createElement('div');
+    s.className = 'screen';
+    const winner = rules.winner;
+    const won = winner !== 0 && winner === localPlayer.team;
+    const title = winner === 0 ? 'DRAW' : won ? 'VICTORY' : 'DEFEAT';
+    const color = winner === 0 ? '#ffd23f' : won ? '#6dff8a' : '#ff7a18';
+    const ranked = rules.ranking(actors);
+    const mvp = ranked[0];
+
+    const teamBlock = (team: Team) => {
+      const rows = actors
+        .filter((a) => a.team === team)
+        .sort((a, b) => (b.moneyBanked + b.moneyStolen) - (a.moneyBanked + a.moneyStolen))
+        .map((a) => {
+          const cls = a === localPlayer ? 'sb-row me' : 'sb-row';
+          return `<div class="${cls}"><div>${a.name}${a === mvp ? ' ★' : ''}</div>` +
+            `<div class="c">${a.frags}</div>` +
+            `<div class="c">$${Math.floor(a.moneyStolen).toLocaleString()}</div>` +
+            `<div class="c">$${Math.floor(a.moneyBanked).toLocaleString()}</div></div>`;
+        }).join('');
+      return `<div class="sb-team t${team}">${teamName(team)} ` +
+        `<span>BANK $${rules.bank[team].toLocaleString()}</span></div>` +
+        `<div class="sb-row head"><div>PLAYER</div><div class="c">KILLS</div>` +
+        `<div class="c">STOLEN</div><div class="c">BANKED</div></div>${rows}`;
+    };
+
+    s.innerHTML = `
+      <div class="logo" style="font-size:52px;color:${color};">${title}</div>
+      <div class="tag">${winner === 0 ? 'The vaults are even' : `${teamName(winner)} team wins the raid`}
+        &nbsp;·&nbsp; MVP ${mvp ? mvp.name : '—'}</div>
+      <div id="scoreboard" style="position:relative;transform:none;left:auto;top:auto;width:520px;">
+        <h2>Cash Raid — Results</h2>
+        ${teamBlock(1)}${teamBlock(2)}
       </div>
       <div class="btn-row">
         <button class="primary" id="e-again">Play Again</button>
