@@ -1,12 +1,12 @@
 import type { ClientMsg, ServerMsg } from './protocol';
 
 /**
- * Thin WebSocket client for online play. Connects, joins, and dispatches
- * decoded server messages to the handler the Game installs on `onMessage`.
+ * Thin WebSocket client for online play. Connects and dispatches decoded
+ * server messages to the handler the Game installs on `onMessage`. The Game
+ * sends `createRoom` / `joinRoom` itself once the socket is open.
  */
 export class NetClient {
   private ws: WebSocket | null = null;
-  private playerName = 'PLAYER';
 
   /** Installed by the Game; receives every decoded server message. */
   onMessage: ((msg: ServerMsg) => void) | null = null;
@@ -17,9 +17,8 @@ export class NetClient {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
-  /** Connect and send `join`. Resolves once the socket is open. */
-  connect(url: string, name: string): Promise<void> {
-    this.playerName = name;
+  /** Open the socket. Resolves once it is connected. */
+  connect(url: string): Promise<void> {
     return new Promise((resolve, reject) => {
       let ws: WebSocket;
       try {
@@ -33,7 +32,6 @@ export class NetClient {
 
       ws.onopen = () => {
         clearTimeout(failTimer);
-        this.send({ t: 'join', name: this.playerName });
         resolve();
       };
       ws.onerror = () => {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Physics } from '../physics/Physics';
 import type { PickupType } from '../entities/Pickup';
 
@@ -30,13 +31,16 @@ export class Arena {
   waypoints: THREE.Vector3[] = [];
   waypointLinks: number[][] = [];
 
-  private scene: THREE.Scene;
-  private physics: Physics;
+  protected scene: THREE.Scene;
+  protected physics: Physics;
 
-  private matFloor!: THREE.Material;
-  private matWall!: THREE.Material;
-  private matStruct!: THREE.Material;
-  private matTrim!: THREE.Material;
+  /** Static colliders this arena owns — released by dispose(). */
+  protected colliders: RAPIER.Collider[] = [];
+
+  protected matFloor!: THREE.Material;
+  protected matWall!: THREE.Material;
+  protected matStruct!: THREE.Material;
+  protected matTrim!: THREE.Material;
 
   constructor(scene: THREE.Scene, physics: Physics) {
     this.scene = scene;
@@ -117,9 +121,20 @@ export class Arena {
     this.buildWaypoints(PT);
   }
 
+  /** Tear down all meshes + colliders so another arena can be built. */
+  dispose() {
+    this.scene.remove(this.root);
+    this.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+    });
+    for (const c of this.colliders) this.physics.removeCollider(c);
+    this.colliders = [];
+  }
+
   // -------------------------------------------------------------------
 
-  private makeMaterials() {
+  protected makeMaterials() {
     const grid = (base: string, line: string, accent: string) => {
       const c = document.createElement('canvas');
       c.width = c.height = 256;
@@ -160,7 +175,7 @@ export class Arena {
   }
 
   /** Visual box + matching static collider. */
-  private box(
+  protected box(
     cx: number, cy: number, cz: number,
     sx: number, sy: number, sz: number,
     mat: THREE.Material,
@@ -170,11 +185,11 @@ export class Arena {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.root.add(mesh);
-    this.physics.addStaticBox(cx, cy, cz, sx / 2, sy / 2, sz / 2);
+    this.colliders.push(this.physics.addStaticBox(cx, cy, cz, sx / 2, sy / 2, sz / 2));
   }
 
   /** Rotated-box ramp from `start` (bottom) to `end` (top). */
-  private ramp(start: THREE.Vector3, end: THREE.Vector3, width: number) {
+  protected ramp(start: THREE.Vector3, end: THREE.Vector3, width: number) {
     const thickness = 0.7;
     const fwd = end.clone().sub(start).normalize();
     const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), fwd).normalize();
@@ -191,14 +206,14 @@ export class Arena {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.root.add(mesh);
-    this.physics.addStaticBox(
+    this.colliders.push(this.physics.addStaticBox(
       center.x, center.y, center.z,
       length / 2, thickness / 2, width / 2, quat,
-    );
+    ));
   }
 
   /** Glowing trim square around the central platform. */
-  private trimRing(cx: number, cy: number, cz: number, half: number, color: number) {
+  protected trimRing(cx: number, cy: number, cz: number, half: number, color: number) {
     const mat = new THREE.MeshStandardMaterial({
       color, emissive: color, emissiveIntensity: 1.6, roughness: 0.4,
     });
@@ -212,7 +227,7 @@ export class Arena {
     seg(t, half * 2, half, 0); seg(t, half * 2, -half, 0);
   }
 
-  private addJumpPad(footPos: THREE.Vector3, launch: THREE.Vector3) {
+  protected addJumpPad(footPos: THREE.Vector3, launch: THREE.Vector3) {
     const mat = new THREE.MeshStandardMaterial({
       color: 0xff7a18, emissive: 0xff7a18, emissiveIntensity: 1.8, roughness: 0.3,
     });
@@ -232,7 +247,7 @@ export class Arena {
     });
   }
 
-  private buildWaypoints(platformTop: number) {
+  protected buildWaypoints(platformTop: number) {
     const W = (x: number, y: number, z: number) =>
       this.waypoints.push(new THREE.Vector3(x, y, z));
 
@@ -252,8 +267,11 @@ export class Arena {
     W(4, platformTop, 4); W(-4, platformTop, -4);
     W(4, platformTop, -4); W(-4, platformTop, 4);
 
-    // auto-link by proximity with a line-of-sight check
-    const maxLink = 21;
+    this.linkWaypoints(21);
+  }
+
+  /** Auto-link waypoints within `maxLink` units that have line of sight. */
+  protected linkWaypoints(maxLink: number) {
     for (let i = 0; i < this.waypoints.length; i++) this.waypointLinks.push([]);
     for (let i = 0; i < this.waypoints.length; i++) {
       for (let j = i + 1; j < this.waypoints.length; j++) {

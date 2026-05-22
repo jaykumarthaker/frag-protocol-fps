@@ -1,11 +1,12 @@
 import type { Actor } from '../entities/Actor';
 import type { MatchConfig } from '../core/types';
+import type { MatchRules } from './MatchRules';
 
 /**
  * Deathmatch rules: first to the frag limit (or the highest score when the
  * time limit runs out) wins. Per-actor scores live on the Actor itself.
  */
-export class Match {
+export class Match implements MatchRules {
   config: MatchConfig;
   timeLeft: number;
   over = false;

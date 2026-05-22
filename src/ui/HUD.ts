@@ -1,6 +1,9 @@
 import type { Player } from '../entities/Player';
 import type { Actor } from '../entities/Actor';
-import type { Match } from '../game/Match';
+import type { MatchRules } from '../game/MatchRules';
+import type { CashRaidRules } from '../game/CashRaidRules';
+import type { Team } from '../core/types';
+import { teamName } from '../game/teams';
 import { WEAPONS, WEAPON_ORDER } from '../weapons/Weapons';
 
 /** In-game heads-up display: an HTML/CSS overlay rendered above the canvas. */
@@ -21,6 +24,10 @@ export class HUD {
   private respawnText: HTMLElement;
   private scoreboard: HTMLElement;
   private powerup: HTMLElement;
+  private banks: HTMLElement;
+  private carried: HTMLElement;
+  private prompt: HTMLElement;
+  private cashfeed: HTMLElement;
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
@@ -32,9 +39,13 @@ export class HUD {
       <div id="matchstate">
         <div id="timer">0:00</div>
         <div id="scoreline"></div>
+        <div id="banks" class="hidden"></div>
       </div>
       <div id="announce"></div>
       <div id="killfeed"></div>
+      <div id="cashfeed"></div>
+      <div id="carried" class="hidden"></div>
+      <div id="prompt" class="hidden"></div>
       <div id="vitals">
         <div class="vital"><div class="num" id="health-num">100</div><div class="lbl">HEALTH</div></div>
         <div class="vital"><div class="num" id="armor-num">0</div><div class="lbl">ARMOR</div></div>
@@ -68,6 +79,10 @@ export class HUD {
     this.respawnText = this.q('#respawn-text');
     this.scoreboard = this.q('#scoreboard');
     this.powerup = this.q('#powerup');
+    this.banks = this.q('#banks');
+    this.carried = this.q('#carried');
+    this.prompt = this.q('#prompt');
+    this.cashfeed = this.q('#cashfeed');
     this.powerup.style.cssText =
       'position:absolute;left:28px;bottom:120px;color:#b98bff;font-size:14px;' +
       'letter-spacing:2px;text-shadow:0 0 12px #b98bff;';
@@ -89,7 +104,10 @@ export class HUD {
   }
 
   /** Per-frame refresh of vitals, ammo, weapons, timer and score. */
-  update(player: Player, match: Match, actors: Actor[], time: number) {
+  update(
+    player: Player, match: MatchRules, actors: Actor[], time: number,
+    cashRules?: CashRaidRules | null,
+  ) {
     this.healthNum.textContent = String(Math.ceil(player.health));
     this.healthNum.classList.toggle('low', player.health <= 30);
     this.armorNum.textContent = String(Math.ceil(player.armor));
@@ -102,23 +120,63 @@ export class HUD {
       const id = slot.dataset.weapon!;
       const def = WEAPONS[id];
       const ammo = player.ammo[id] ?? 0;
-      slot.textContent = `${def.slot}  ${def.name}  ${ammo}`;
+      const owned = player.inventory.has(id);
+      slot.textContent = `${def.slot}  ${def.name}  ${owned ? ammo : '—'}`;
       slot.classList.toggle('active', id === player.currentWeapon);
-      slot.classList.toggle('empty', ammo <= 0);
+      slot.classList.toggle('empty', !owned || ammo <= 0);
     }
 
     this.timer.textContent = formatTime(match.timeLeft);
-    const ranked = match.ranking(actors);
-    const rank = ranked.indexOf(player) + 1;
-    this.scoreline.innerHTML =
-      `FRAGS <b>${player.frags}</b> / ${match.config.fragLimit} ` +
-      `&nbsp;•&nbsp; RANK <b>${rank}</b> / ${actors.length}`;
+
+    if (cashRules) {
+      this.scoreline.classList.add('hidden');
+      this.banks.classList.remove('hidden');
+      this.carried.classList.remove('hidden');
+      const t = player.team;
+      const mine = cashRules.bank[t] ?? 0;
+      const theirs = cashRules.bank[t === 1 ? 2 : 1] ?? 0;
+      this.banks.innerHTML =
+        `<span class="bk t${t}">YOU $${mine.toLocaleString()}</span>` +
+        `<span class="bk vs">vs</span>` +
+        `<span class="bk t${t === 1 ? 2 : 1}">ENEMY $${theirs.toLocaleString()}</span>` +
+        `<span class="bk tgt">TARGET $${cashRules.winTarget.toLocaleString()}</span>`;
+      const carried = Math.floor(player.carried);
+      this.carried.textContent = `▮ CARRYING  $${carried.toLocaleString()}`;
+      this.carried.classList.toggle('heavy', carried >= 15000);
+      this.carried.classList.toggle('empty', carried <= 0);
+    } else {
+      this.scoreline.classList.remove('hidden');
+      this.banks.classList.add('hidden');
+      this.carried.classList.add('hidden');
+      this.prompt.classList.add('hidden');
+      const ranked = match.ranking(actors);
+      const rank = ranked.indexOf(player) + 1;
+      this.scoreline.innerHTML =
+        `FRAGS <b>${player.frags}</b> / ${match.config.fragLimit} ` +
+        `&nbsp;•&nbsp; RANK <b>${rank}</b> / ${actors.length}`;
+    }
 
     if (player.ampActive()) {
       this.powerup.textContent = `⚡ DAMAGE AMP  ${Math.ceil(player.ampUntil - time)}s`;
     } else {
       this.powerup.textContent = '';
     }
+  }
+
+  /** Contextual prompt ("HOLD E TO DEPOSIT", …); empty string hides it. */
+  setPrompt(text: string) {
+    this.prompt.textContent = text;
+    this.prompt.classList.toggle('hidden', !text);
+  }
+
+  /** Cash transaction feed entry (deposits, steals, pickups, purchases). */
+  addCashEvent(text: string) {
+    const row = document.createElement('div');
+    row.className = 'cf-row';
+    row.textContent = text;
+    this.cashfeed.appendChild(row);
+    while (this.cashfeed.children.length > 5) this.cashfeed.removeChild(this.cashfeed.firstChild!);
+    setTimeout(() => row.remove(), 4500);
   }
 
   showHitmarker(kill: boolean) {
@@ -140,11 +198,16 @@ export class HUD {
     this.announceEl.classList.add('announce-pop');
   }
 
-  addKill(killer: string, victim: string, weaponLabel: string, killerIsPlayer: boolean, victimIsPlayer: boolean) {
+  addKill(
+    killer: string, victim: string, weaponLabel: string,
+    killerIsPlayer: boolean, victimIsPlayer: boolean,
+    killerTeam: Team = 0, victimTeam: Team = 0,
+  ) {
     const row = document.createElement('div');
     row.className = 'kf-row';
-    const k = `<span class="killer ${killerIsPlayer ? 'you' : ''}">${killer}</span>`;
-    const v = `<span class="victim ${victimIsPlayer ? 'you' : ''}">${victim}</span>`;
+    const tc = (t: Team) => (t === 1 ? ' team-1' : t === 2 ? ' team-2' : '');
+    const k = `<span class="killer ${killerIsPlayer ? 'you' : ''}${tc(killerTeam)}">${killer}</span>`;
+    const v = `<span class="victim ${victimIsPlayer ? 'you' : ''}${tc(victimTeam)}">${victim}</span>`;
     row.innerHTML = `${k} <span class="wpn">» ${weaponLabel} »</span> ${v}`;
     this.killfeed.appendChild(row);
     while (this.killfeed.children.length > 5) this.killfeed.removeChild(this.killfeed.firstChild!);
@@ -168,9 +231,13 @@ export class HUD {
     this.respawn.classList.add('hidden');
   }
 
-  toggleScoreboard(show: boolean, match: Match, actors: Actor[], player: Actor) {
+  toggleScoreboard(
+    show: boolean, match: MatchRules, actors: Actor[], player: Actor,
+    cashRules?: CashRaidRules | null,
+  ) {
     this.scoreboard.classList.toggle('hidden', !show);
     if (!show) return;
+    if (cashRules) { this.renderCashScoreboard(cashRules, actors, player); return; }
     const rows = match.ranking(actors).map((a) => {
       const cls = a === player ? 'sb-row me' : 'sb-row';
       return `<div class="${cls}"><div>${a.name}</div>` +
@@ -181,6 +248,27 @@ export class HUD {
       `<h2>Deathmatch — Standings</h2>` +
       `<div class="sb-row head"><div>PLAYER</div><div class="c">FRAGS</div>` +
       `<div class="c">DEATHS</div><div class="c">SCORE</div></div>${rows}`;
+  }
+
+  private renderCashScoreboard(rules: CashRaidRules, actors: Actor[], player: Actor) {
+    const teamBlock = (team: Team) => {
+      const rows = actors
+        .filter((a) => a.team === team)
+        .sort((a, b) => (b.moneyBanked + b.moneyStolen) - (a.moneyBanked + a.moneyStolen))
+        .map((a) => {
+          const cls = a === player ? 'sb-row me' : 'sb-row';
+          return `<div class="${cls}"><div>${a.name}</div>` +
+            `<div class="c">${a.frags}</div>` +
+            `<div class="c">$${Math.floor(a.moneyStolen).toLocaleString()}</div>` +
+            `<div class="c">$${Math.floor(a.moneyBanked).toLocaleString()}</div></div>`;
+        }).join('');
+      return `<div class="sb-team t${team}">${teamName(team)} ` +
+        `<span>BANK $${rules.bank[team].toLocaleString()}</span></div>` +
+        `<div class="sb-row head"><div>PLAYER</div><div class="c">KILLS</div>` +
+        `<div class="c">STOLEN</div><div class="c">BANKED</div></div>${rows}`;
+    };
+    this.scoreboard.innerHTML =
+      `<h2>Cash Raid — Standings</h2>${teamBlock(1)}${teamBlock(2)}`;
   }
 }
 

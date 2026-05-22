@@ -16,14 +16,19 @@ async function main() {
   `;
   app.appendChild(loading);
 
+  let game;
   try {
-    await Game.create(app);
+    game = await Game.create(app);
   } catch (err) {
     loading.innerHTML = `<div class="txt" style="color:#ff3b3b">FAILED TO START</div>`;
     console.error(err);
     return;
   }
   loading.remove();
+
+  // An invite link (?room=CODE) jumps straight to the join screen.
+  const code = new URLSearchParams(location.search).get('room');
+  if (code) game.menu.openJoinWithCode(code.toUpperCase());
 }
 
 main();

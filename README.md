@@ -2,8 +2,9 @@
 
 A browser-based **arena first-person shooter** — a homage to early-2000s
 tournament FPS (Unreal Tournament 2003 and friends), running entirely in the
-browser with no plugins and no install. Single-player vs. AI bots **and**
-online multiplayer deathmatch.
+browser with no plugins and no install. Two modes — classic **Deathmatch**
+and the team-based **Cash Raid** — playable solo vs. AI bots **or** in online
+multiplayer rooms with a pre-match lobby and shareable invite codes.
 
 > **What this is.** An *original* game inspired by the UT2003 *experience* —
 > fast dodge/double-jump movement, arena deathmatch, shock/rocket/flak weapon
@@ -16,6 +17,13 @@ Built with **Three.js** (WebGL + bloom), **Rapier** (WASM physics),
 TypeScript and Vite. Online play uses a small authoritative **Node + ws**
 server.
 
+## Screenshots
+
+|  |  |
+|:-:|:-:|
+| ![Main menu](screenshots/menu.png)<br>**Main menu** — Deathmatch or Cash Raid | ![Cash Raid match](screenshots/cashraid-overview.png)<br>**Cash Raid** — raid vaults, bank the cash |
+| ![Vault and buy station](screenshots/cashraid-action.png)<br>**Vaults & buy stations** — spend banked money mid-match | ![Online lobby](screenshots/lobby.png)<br>**Online lobby** — invite-code rooms & team select |
+
 ## Play it
 
 ```bash
@@ -25,8 +33,9 @@ npm run dev
 
 Open the printed URL (default <http://localhost:5173>). From the menu:
 
-- **Enter Arena** — offline deathmatch vs. AI bots.
-- **Play Online** — connect to a server for live multiplayer (see below).
+- **Instant Action** — pick **Deathmatch** or **Cash Raid** and play offline
+  vs. AI bots.
+- **Play Online** — create or join a room for live multiplayer (see below).
 
 Click the canvas to lock the mouse.
 
@@ -40,6 +49,8 @@ Click the canvas to lock the mouse.
 | Aim               | Mouse                                   |
 | Fire / alt-fire   | Left click / Right click                |
 | Switch weapon     | `1`–`4`, mouse wheel, or `Q`            |
+| Interact (Cash Raid)| hold `E` — deposit at / raid a vault  |
+| Buy menu (Cash Raid)| `B` near your buy station; `1`–`5` to buy |
 | Scoreboard        | hold `Tab`                              |
 | Pause             | `Esc`                                   |
 
@@ -52,9 +63,22 @@ Click the canvas to lock the mouse.
 | 3    | Rocket Launcher | splash rocket (rocket-jump!)    | —                              |
 | 4    | Pulse Rifle     | rapid beam                      | plasma orb — **beam an orb for the combo blast** |
 
+### Game modes
+
+**Deathmatch** — classic free-for-all: first to the frag limit, or the most
+frags when the clock runs out, wins.
+
+**Cash Raid** — two teams on a purpose-built two-base map. Raid the enemy
+vault for cash, carry it home, and **hold `E`** in your own vault to bank it.
+Die while carrying and you drop 70% of it as a briefcase anyone can grab. Bank
+money is the team's shared wallet — spend it at your **buy station** (`B`) on
+weapons and armour. First team to the win target, or the richer bank at time,
+wins. Bots play the objective: they raid, carry, bank and defend.
+
 ## Multiplayer
 
-Online deathmatch runs against a small authoritative server.
+Online play runs against a small authoritative server that hosts many
+independent **rooms**, each with its own pre-match lobby.
 
 ```bash
 cd server
@@ -62,15 +86,22 @@ npm install
 npm start            # ws://localhost:2567  (set PORT to change)
 ```
 
-Then in the game choose **Play Online**, enter a callsign, point it at
-`ws://localhost:2567` and connect. Open the game in another tab/machine to
-join the same arena.
+Then in the game choose **Play Online**:
+
+- **Create Room** — pick the mode and settings (max players, duration, bots,
+  win target, public/private). You get a 6-character **invite code** and a
+  shareable link (`?room=CODE`).
+- **Join Room** — enter a code, or open an invite link to jump straight in.
+- In the **lobby**, pick a team, ready up, and the host starts the match.
+
+How it works:
 
 - Clients simulate their own player locally (responsive) and report
   transforms ~20 Hz; remote players are interpolated between snapshots.
-- The server is **authoritative** for health, kills, scores and the match
-  clock, so every client agrees on damage and standings.
-- Players-only deathmatch (no bots / pickups online in this version).
+- The server is **authoritative** for health, kills, scores, the match clock
+  and **all Cash Raid money** (carried cash, team banks, vault deposits,
+  death drops, purchases), so every client agrees on the outcome.
+- Rooms can be filled with objective-aware bots via the lobby's bot count.
 
 See [server/README.md](server/README.md) for hosting notes.
 
@@ -95,16 +126,17 @@ process — host it wherever long-running WebSockets are allowed.)
 src/
   core/      Game orchestrator, input, look math, model loading, types
   physics/   Rapier world + character controller wrapper
-  arena/     procedural blockout arena (geometry, jump pads, AI waypoints)
-  entities/  Actor base, Player, Bot, RemotePlayer, Projectile, Pickup
+  arena/     blockout deathmatch arena + two-base Cash Raid arena
+  entities/  Actor/Player/Bot/RemotePlayer, Projectile, Pickup,
+             VaultZone, BuyStation, CashDrop
   weapons/   weapon data + firing system (hitscan / pellets / projectiles)
-  ai/        BotBrain (perception, A* navigation, combat) + nav graph
+  ai/        BotBrain (perception, A* nav, combat, Cash Raid objectives)
   audio/     procedural Web Audio SFX + speech-synthesis announcer
   effects/   transient visual FX (tracers, beams, explosions)
   net/       online protocol + WebSocket client
-  ui/        HUD overlay + menus
-  game/      Match (deathmatch rules)
-server/      authoritative online game server (Node + ws)
+  ui/        HUD overlay, menus + lobby screens, buy menu
+  game/      Match (deathmatch) + CashRaidRules, teams, shop
+server/      authoritative server: rooms, lobby, server bots (Node + ws)
 ```
 
 ## Assets
@@ -117,12 +149,16 @@ licensing.
 ## Status & roadmap
 
 Done: arena movement, 4 weapons, AI bots, deathmatch, HUD/menus, procedural
-audio + announcer, an art pass (animated characters, bloom, environment) and
-online multiplayer.
+audio + announcer, an art pass (animated characters, bloom, environment),
+online multiplayer, and the team-based **Cash Raid** mode — teams, vaults,
+carried money, death drops, buy stations, a purpose-built two-base map,
+objective-aware bots, and a server-authoritative rooms + lobby system with
+invite codes.
 
-Possible next steps: client-side prediction for lower-latency online play,
-server-side pickups/power-ups, more maps and game modes (Team DM, CTF), and a
-proper environment-art pass with CC0 modular kits.
+Possible next steps: client-side prediction for lower-latency online play, the
+Cash Raid "Most Wanted" / minimap layer, defensive upgrades (turrets, traps),
+player classes, ranked matchmaking, and a proper environment-art pass with CC0
+modular kits.
 
 ## Credits
 

@@ -1,206 +1,165 @@
 /**
- * Frag Protocol — authoritative online deathmatch server.
+ * Frag Protocol — authoritative online server.
  *
- * Model: clients simulate their own player locally and report transforms;
- * the server is authoritative for health, kills, scores and the match. Hits
- * are reported by the firing client and applied server-side, so every client
- * agrees on damage and standings. Players-only (no bots / pickups in v1).
- *
- * Protocol is line-delimited JSON over WebSocket. See src/net/protocol.ts on
- * the client for the message shapes.
+ * Hosts many independent rooms keyed by a 6-character invite code. Each room
+ * runs a pre-match lobby then an authoritative match (deathmatch or Cash
+ * Raid). The server owns health, kills, the clock and all Cash Raid money;
+ * clients report transforms and request actions. See src/net/protocol.ts.
  */
 import { WebSocketServer } from 'ws';
+import { Room } from './room.mjs';
 
 const PORT = Number(process.env.PORT) || 2567;
-const TICK_MS = 50;            // 20 Hz snapshots
-const RESPAWN_SEC = 2.5;
-const FRAG_LIMIT = 25;
-const TIME_LIMIT = 600;
-const MATCH_RESET_SEC = 9;
+const TICK_MS = 50; // 20 Hz
 
-// Spawn points mirror src/arena/Arena.ts (feet positions).
-const SPAWNS = [
-  [22, 0.05, 22], [-22, 0.05, 22], [22, 0.05, -22], [-22, 0.05, -22],
-  [26, 0.05, 0], [-26, 0.05, 0], [0, 0.05, 26], [0, 0.05, -26],
-];
-const COLORS = [0x36e0ff, 0xff7a18, 0xff3b3b, 0xb98bff, 0x6dff8a, 0xffd23f, 0xff5ec4, 0x5ec8ff];
+/** @type {Map<string, Room>} */
+const rooms = new Map();
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-let nextId = 1;
-/** @type {Map<number, any>} */
-const players = new Map();
-let match = { timeLeft: TIME_LIMIT, over: false, fragLimit: FRAG_LIMIT, winnerId: 0 };
+function genCode() {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    let c = '';
+    for (let i = 0; i < 6; i++) {
+      c += CODE_ALPHABET[(Math.random() * CODE_ALPHABET.length) | 0];
+    }
+    if (!rooms.has(c)) return c;
+  }
+  return 'R' + Date.now().toString(36).slice(-5).toUpperCase();
+}
+
+/** Clamp + sanitise a client-supplied lobby config. */
+function sanitiseConfig(raw) {
+  const r = raw || {};
+  const num = (v, lo, hi, d) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d;
+  };
+  const mode = r.mode === 'cashraid' ? 'cashraid' : 'deathmatch';
+  const diff = ['rookie', 'skilled', 'deadly'].includes(r.difficulty) ? r.difficulty : 'skilled';
+  return {
+    mode,
+    maxPlayers: num(r.maxPlayers, 2, 12, 8),
+    durationSec: num(r.durationSec, 120, 1800, mode === 'cashraid' ? 900 : 600),
+    botCount: num(r.botCount, 0, 10, mode === 'cashraid' ? 4 : 3),
+    fragLimit: num(r.fragLimit, 5, 80, 25),
+    difficulty: diff,
+    startMoney: num(r.startMoney, 0, 100000, 20000),
+    winTarget: num(r.winTarget, 10000, 1000000, 100000),
+    isPublic: !!r.isPublic,
+  };
+}
 
 const wss = new WebSocketServer({ port: PORT });
 console.log(`Frag Protocol server listening on ws://localhost:${PORT}`);
 
 const send = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
-function broadcast(msg, exceptId = 0) {
-  const s = JSON.stringify(msg);
-  for (const p of players.values()) {
-    if (p.id !== exceptId && p.ws.readyState === 1) p.ws.send(s);
-  }
-}
-
-/** Spawn point furthest from currently-alive players. */
-function pickSpawn() {
-  let best = SPAWNS[0];
-  let bestScore = -1;
-  for (const sp of SPAWNS) {
-    let minD = 1e9;
-    for (const p of players.values()) {
-      if (!p.alive) continue;
-      minD = Math.min(minD, Math.hypot(p.x - sp[0], p.z - sp[2]));
-    }
-    const score = (minD === 1e9 ? 100 : minD) + Math.random() * 6;
-    if (score > bestScore) { bestScore = score; best = sp; }
-  }
-  return best;
-}
-
-const publicPlayer = (p) => ({
-  id: p.id, name: p.name, color: p.color,
-  x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch,
-  vx: p.vx, vy: p.vy, vz: p.vz, weapon: p.weapon, anim: p.anim,
-  health: p.health, armor: p.armor, alive: p.alive, frags: p.frags, deaths: p.deaths,
-});
-
-function spawnPlayer(p) {
-  const sp = pickSpawn();
-  p.x = sp[0]; p.y = sp[1]; p.z = sp[2];
-  p.vx = p.vy = p.vz = 0;
-  p.health = 100; p.armor = 0; p.alive = true; p.respawnAt = 0;
-  broadcast({ t: 'spawn', id: p.id, x: sp[0], y: sp[1], z: sp[2] });
-}
-
-function applyHit(attacker, msg) {
-  if (match.over) return;
-  const victim = players.get(msg.targetId);
-  if (!victim || !victim.alive) return;
-  if (!attacker.alive && attacker.id !== victim.id) return;
-
-  let amount = Math.max(0, Math.min(500, Number(msg.amount) || 0));
-  if (victim.armor > 0) {
-    const absorbed = Math.min(victim.armor, amount * 0.66);
-    victim.armor -= absorbed;
-    amount -= absorbed;
-  }
-  victim.health -= amount;
-  if (victim.health > 0) return;
-
-  // death
-  victim.health = 0;
-  victim.alive = false;
-  victim.deaths++;
-  victim.respawnAt = Date.now() + RESPAWN_SEC * 1000;
-  const suicide = attacker.id === victim.id;
-  if (suicide) victim.frags = Math.max(0, victim.frags - 1);
-  else attacker.frags++;
-  broadcast({
-    t: 'kill',
-    killerId: suicide ? 0 : attacker.id,
-    victimId: victim.id,
-    weapon: msg.weapon || 'railgun',
-    headshot: !!msg.headshot,
-  });
-  checkMatchEnd();
-}
-
-function checkMatchEnd() {
-  let leader = null;
-  for (const p of players.values()) if (!leader || p.frags > leader.frags) leader = p;
-  if (leader && leader.frags >= match.fragLimit) endMatch(leader.id);
-}
-
-function endMatch(winnerId) {
-  if (match.over) return;
-  match.over = true;
-  match.winnerId = winnerId || 0;
-  broadcast({ t: 'matchOver', winnerId: match.winnerId });
-  setTimeout(resetMatch, MATCH_RESET_SEC * 1000);
-}
-
-function resetMatch() {
-  match = { timeLeft: TIME_LIMIT, over: false, fragLimit: FRAG_LIMIT, winnerId: 0 };
-  for (const p of players.values()) {
-    p.frags = 0; p.deaths = 0;
-    spawnPlayer(p);
-  }
-  broadcast({ t: 'matchReset', match });
-}
 
 wss.on('connection', (ws) => {
-  let player = null;
+  /** @type {Room|null} */ let room = null;
+  /** @type {any} */ let player = null;
 
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return; }
 
-    if (msg.t === 'join') {
-      if (player) return;
-      const id = nextId++;
-      const sp = pickSpawn();
-      player = {
-        id, ws,
-        name: String(msg.name || 'PLAYER').slice(0, 14).toUpperCase() || 'PLAYER',
-        color: COLORS[(id - 1) % COLORS.length],
-        x: sp[0], y: sp[1], z: sp[2], yaw: 0, pitch: 0,
-        vx: 0, vy: 0, vz: 0, weapon: 'shard', anim: 'Idle',
-        health: 100, armor: 0, alive: true, frags: 0, deaths: 0, respawnAt: 0,
-      };
-      players.set(id, player);
-      send(ws, {
-        t: 'welcome', id,
-        players: [...players.values()].map(publicPlayer),
-        match,
-      });
-      broadcast({ t: 'playerJoined', player: publicPlayer(player) }, id);
-      console.log(`+ ${player.name} (#${id}) — ${players.size} online`);
+    // --- not in a room yet ---
+    if (!room) {
+      if (msg.t === 'createRoom') {
+        const code = genCode();
+        room = new Room(code, sanitiseConfig(msg.config));
+        rooms.set(code, room);
+        player = room.addHuman(ws, msg.name);
+        send(ws, { t: 'roomJoined', code, youId: player.id, host: true });
+        room.broadcastLobby();
+        console.log(`+ room ${code} created (${room.config.mode})`);
+      } else if (msg.t === 'joinRoom') {
+        const code = String(msg.code || '').toUpperCase().trim();
+        const target = rooms.get(code);
+        if (!target) { send(ws, { t: 'roomError', message: 'room not found' }); return; }
+        if (target.phase !== 'lobby') { send(ws, { t: 'roomError', message: 'match already in progress' }); return; }
+        const humans = [...target.players.values()].filter((p) => !p.isBot).length;
+        if (humans >= target.config.maxPlayers) {
+          send(ws, { t: 'roomError', message: 'room is full' }); return;
+        }
+        room = target;
+        player = room.addHuman(ws, msg.name);
+        send(ws, { t: 'roomJoined', code, youId: player.id, host: player.id === room.hostId });
+        room.broadcastLobby();
+      } else {
+        send(ws, { t: 'roomError', message: 'create or join a room first' });
+      }
       return;
     }
-    if (!player) return;
+
+    const isHost = player && player.id === room.hostId;
 
     switch (msg.t) {
-      case 'input':
-        player.x = msg.x; player.y = msg.y; player.z = msg.z;
-        player.yaw = msg.yaw; player.pitch = msg.pitch;
-        player.vx = msg.vx; player.vy = msg.vy; player.vz = msg.vz;
-        player.weapon = msg.weapon; player.anim = msg.anim;
+      case 'leaveRoom':
+        ws.close();
         break;
-      case 'fire':
-        broadcast({
-          t: 'fire', id: player.id, weapon: msg.weapon, alt: !!msg.alt,
-          ox: msg.ox, oy: msg.oy, oz: msg.oz, dx: msg.dx, dy: msg.dy, dz: msg.dz,
-        }, player.id);
+      case 'lobbySetReady':
+        if (room.phase === 'lobby') { player.ready = !!msg.ready; room.broadcastLobby(); }
         break;
-      case 'hit':
-        applyHit(player, msg);
+      case 'lobbySelectTeam':
+        if (room.phase === 'lobby' && (msg.team === 1 || msg.team === 2)) {
+          player.team = msg.team; room.broadcastLobby();
+        }
         break;
+      case 'lobbyConfig':
+        if (isHost && room.phase === 'lobby') {
+          const cfg = sanitiseConfig(msg.config);
+          const humans = [...room.players.values()].filter((p) => !p.isBot).length;
+          cfg.maxPlayers = Math.max(cfg.maxPlayers, humans);
+          room.config = cfg;
+          room.match = room.freshMatch();
+          room.broadcastLobby();
+        }
+        break;
+      case 'lobbyKick':
+        if (isHost && room.phase === 'lobby') {
+          const victim = room.players.get(msg.id);
+          if (victim && !victim.isBot && victim.id !== room.hostId) {
+            send(victim.ws, { t: 'kicked' });
+            room.removePlayer(victim.id);
+            victim.ws.close();
+          }
+        }
+        break;
+      case 'lobbyStart':
+        if (isHost && room.phase === 'lobby') {
+          room.start();
+          console.log(`> room ${room.code} match started`);
+        }
+        break;
+      case 'input': room.onInput(player, msg); break;
+      case 'fire':  room.onFire(player, msg); break;
+      case 'hit':   room.onHit(player, msg); break;
+      case 'buy':   room.onBuy(player, msg); break;
     }
   });
 
   ws.on('close', () => {
-    if (!player) return;
-    players.delete(player.id);
-    broadcast({ t: 'playerLeft', id: player.id });
-    console.log(`- ${player.name} — ${players.size} online`);
+    if (!room || !player) return;
+    const code = room.code;
+    room.removePlayer(player.id);
+    const humans = [...room.players.values()].filter((p) => !p.isBot).length;
+    if (humans === 0) {
+      rooms.delete(code);
+      console.log(`- room ${code} closed`);
+    }
+    room = null;
+    player = null;
   });
 });
 
-// fixed-rate tick: clock, respawns, snapshot broadcast
+// fixed-rate tick: advance every room, prune empties
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
   const dt = (now - last) / 1000;
   last = now;
-
-  if (!match.over) {
-    match.timeLeft -= dt;
-    if (match.timeLeft <= 0) { match.timeLeft = 0; endMatch(0); }
-  }
-  for (const p of players.values()) {
-    if (!p.alive && p.respawnAt && now >= p.respawnAt) spawnPlayer(p);
-  }
-  if (players.size > 0) {
-    broadcast({ t: 'state', players: [...players.values()].map(publicPlayer), match });
+  for (const [code, room] of rooms) {
+    room.tick(dt);
+    if (room.empty || room.players.size === 0) rooms.delete(code);
   }
 }, TICK_MS);

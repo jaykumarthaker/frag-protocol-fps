@@ -63,6 +63,11 @@ export class Physics {
     this.world.removeRigidBody(body);
   }
 
+  /** Remove a static collider (used when an arena is torn down). */
+  removeCollider(collider: RAPIER.Collider) {
+    this.world.removeCollider(collider, false);
+  }
+
   /**
    * Cast a ray against world geometry only (skips actor capsules).
    * Returns time-of-impact along `dir` and the surface normal, or null.
