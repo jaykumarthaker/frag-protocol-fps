@@ -18,7 +18,10 @@
       "Bash(ls node_modules/puppeteer-core)",
       "Bash(node -e \"import\\('./server/server.mjs'\\).then\\(\\(\\)=>setTimeout\\(\\(\\)=>{console.log\\('server boot OK'\\);process.exit\\(0\\)},600\\)\\)\")",
       "Bash(pkill -f vite)",
-      "Bash(git ls-tree *)"
+      "Bash(git ls-tree *)",
+      "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\server.mjs\")",
+      "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\room.mjs\")",
+      "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\botbrain.mjs\")"
     ]
   }
 }

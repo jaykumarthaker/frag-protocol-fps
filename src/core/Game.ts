@@ -390,10 +390,12 @@ export class Game {
     this.lastFrame = performance.now();
   }
 
-  private clearMatch() {
-    this.net?.close();
-    this.net = null;
-    this.mode = 'offline';
+  private clearMatch(keepNet = false) {
+    if (!keepNet) {
+      this.net?.close();
+      this.net = null;
+      this.mode = 'offline';
+    }
     this.localId = 0;
     this.remotes.clear();
     this.player?.dispose();
@@ -945,7 +947,7 @@ export class Game {
   }
 
   private onMatchStart(msg: Extract<ServerMsg, { t: 'matchStart' }>) {
-    this.clearMatch();
+    this.clearMatch(true);
     this.mode = 'online';
     this.gameMode = msg.match.mode;
     this.localId = msg.youId;
