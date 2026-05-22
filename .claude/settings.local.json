@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(node verify-mp.mjs)",
-      "Bash(rm -f verify.mjs verify-mp.mjs shot-menu.png shot-game.png shot-mp.png vite-dev.log server.log)"
+      "Bash(rm -f verify.mjs verify-mp.mjs shot-menu.png shot-game.png shot-mp.png vite-dev.log server.log)",
+      "Bash(node --check server.mjs)",
+      "Bash(node --check room.mjs)",
+      "Bash(node --check botbrain.mjs)",
+      "Bash(node --check cashraid-map.mjs)",
+      "Bash(node smoke.mjs)",
+      "Bash(rm -f server/smoke.mjs)",
+      "Bash(pkill -f \"node server.mjs\")",
+      "Bash(pkill -f \"remote-debugging-port\")",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git restore *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Read(//c/Program Files/**)"
     ]
   }
 }
