@@ -17,6 +17,14 @@ Built with **Three.js** (WebGL + bloom), **Rapier** (WASM physics),
 TypeScript and Vite. Online play uses a small authoritative **Node + ws**
 server.
 
+## Try it now
+
+**[jaykumarthaker.github.io/frag-protocol-fps](https://jaykumarthaker.github.io/frag-protocol-fps/)**
+
+No install, no plugin — runs entirely in the browser. Click the canvas to
+lock the mouse and start playing. For online multiplayer, **Play Online →
+Create Room** — the server URL is pre-filled automatically.
+
 ## Screenshots
 
 |  |  |
@@ -114,11 +122,18 @@ npm run preview    # serve the production build locally
 
 `dist/` is a static site — host it anywhere (Netlify, Vercel, GitHub Pages,
 itch.io). `vite.config.ts` uses `base: './'` so it works from any sub-path.
-A GitHub Pages workflow is included at
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — push to
-`main`, enable Pages (*Settings → Pages → Source: GitHub Actions*), and the
-site builds and deploys automatically. (The online server is a separate Node
-process — host it wherever long-running WebSockets are allowed.)
+Two CI/CD workflows are included:
+
+- **[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)** — builds
+  and publishes the static frontend to **GitHub Pages** on every push to
+  `main`. Enable Pages under *Settings → Pages → Source: GitHub Actions*.
+  Set the `VITE_WS_URL` repository secret to your server's `wss://` address
+  and the client will have it pre-filled for players.
+
+- **[`.github/workflows/railway-deploy.yml`](.github/workflows/railway-deploy.yml)**
+  — deploys `server/` to **Railway** on every push to `main`. Requires two
+  repository secrets: `RAILWAY_TOKEN` (Account Settings → Tokens) and
+  `RAILWAY_SERVICE_ID` (service Settings page in Railway dashboard).
 
 ## Project structure
 
