@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+*.local
+
+# verification artifacts
+shot-*.png
+verify*.mjs

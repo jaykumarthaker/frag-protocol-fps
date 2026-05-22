@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node verify-mp.mjs)",
+      "Bash(rm -f verify.mjs verify-mp.mjs shot-menu.png shot-game.png shot-mp.png vite-dev.log server.log)"
+    ]
+  }
+}

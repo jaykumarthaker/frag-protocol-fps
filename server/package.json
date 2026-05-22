@@ -1,0 +1,14 @@
+{
+  "name": "frag-protocol-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Authoritative game server for Frag Protocol online deathmatch",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "frag-protocol": "file:..",
+    "ws": "^8.18.0"
+  }
+}
