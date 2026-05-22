@@ -50,7 +50,7 @@ export class Menu {
   private fragLimit = 20;
   private difficulty: MatchConfig['difficulty'] = 'skilled';
   private playerName = 'PLAYER';
-  private serverUrl = (import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://localhost:2567';
+  private serverUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:2567';
   private lobbyCfg: LobbyConfig = defaultLobbyConfig();
 
   constructor(parent: HTMLElement, handlers: MenuHandlers) {
