@@ -91,6 +91,48 @@ export class Effects {
     });
   }
 
+  /** Expanding additive ring at a muzzle, oriented along the shot. */
+  muzzleRing(pos: THREE.Vector3, dir: THREE.Vector3, color: number) {
+    const geo = new THREE.RingGeometry(0.12, 0.2, 22);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.position.copy(pos);
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    this.add({
+      obj: ring, life: 0.18, maxLife: 0.18,
+      tick: (e) => {
+        const k = 1 - e.life / e.maxLife;
+        ring.scale.setScalar(0.5 + k * 3.4);
+        mat.opacity = 0.9 * (1 - k);
+      },
+      cleanup: () => { geo.dispose(); mat.dispose(); },
+    });
+  }
+
+  /** A soft, drifting puff — rocket exhaust / lingering smoke. */
+  puff(pos: THREE.Vector3, color: number, size = 0.5, life = 0.5) {
+    const mat = new THREE.SpriteMaterial({
+      color, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.position.copy(pos);
+    spr.scale.setScalar(size);
+    this.add({
+      obj: spr, life, maxLife: life,
+      tick: (e, dt) => {
+        const k = e.life / e.maxLife;
+        mat.opacity = 0.5 * k;
+        spr.scale.setScalar(size * (1 + (1 - k) * 1.6));
+        spr.position.y += dt * 0.4;
+      },
+      cleanup: () => mat.dispose(),
+    });
+  }
+
   /** Brief additive flash at a muzzle / spawn point. */
   flash(pos: THREE.Vector3, color: number, size = 0.6, life = 0.06) {
     const mat = new THREE.SpriteMaterial({
@@ -150,8 +192,9 @@ export class Effects {
     });
   }
 
-  /** Explosion: expanding additive shell + fading point light. */
+  /** Explosion: expanding additive shell + shockwave ring + fading light. */
   explosion(pos: THREE.Vector3, radius: number, color: number) {
+    const big = radius > 3;
     const geo = new THREE.SphereGeometry(1, 16, 12);
     const mat = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0.85,
@@ -160,7 +203,8 @@ export class Effects {
     const shell = new THREE.Mesh(geo, mat);
     shell.position.copy(pos);
 
-    const light = new THREE.PointLight(color, 40, radius * 4);
+    const peakLight = big ? 70 : 40;
+    const light = new THREE.PointLight(color, peakLight, radius * 4.5);
     light.position.copy(pos);
 
     const group = new THREE.Group();
@@ -173,15 +217,37 @@ export class Effects {
         const k = 1 - e.life / e.maxLife;
         shell.scale.setScalar(0.3 + k * radius);
         mat.opacity = 0.85 * (1 - k);
-        light.intensity = 40 * (1 - k);
+        light.intensity = peakLight * (1 - k);
       },
       cleanup: () => { geo.dispose(); mat.dispose(); },
     });
 
-    // Debris sparks.
+    // A flat shockwave ring punching outward along the ground plane.
+    if (big) {
+      const waveGeo = new THREE.RingGeometry(0.5, 0.8, 28);
+      const waveMat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const wave = new THREE.Mesh(waveGeo, waveMat);
+      wave.rotation.x = -Math.PI / 2;
+      wave.position.copy(pos).setY(pos.y - radius * 0.3 + 0.1);
+      this.add({
+        obj: wave, life: 0.5, maxLife: 0.5,
+        tick: (e) => {
+          const k = 1 - e.life / e.maxLife;
+          wave.scale.setScalar(0.4 + k * radius * 1.7);
+          waveMat.opacity = 0.7 * (1 - k);
+        },
+        cleanup: () => { waveGeo.dispose(); waveMat.dispose(); },
+      });
+    }
+
+    // Debris sparks — denser for big blasts.
     const sparkMat = new THREE.MeshBasicMaterial({ color, blending: THREE.AdditiveBlending, depthWrite: false });
+    const sparkCount = Math.min(30, Math.round(10 + radius * 2.6));
     const sparks: { m: THREE.Mesh; v: THREE.Vector3 }[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < sparkCount; i++) {
       const m = new THREE.Mesh(this.sparkGeo, sparkMat);
       m.position.copy(pos);
       const v = new THREE.Vector3(

@@ -93,6 +93,9 @@ export class Game {
   time = 0;
   settings: GameSettings = { sensitivity: 1.0, volume: 0.7, fov: 95 };
 
+  /** Camera-shake "trauma" (0..1); decays each frame, read by `Player`. */
+  shakeTrauma = 0;
+
   private lastFrame = 0;
   private menuTime = 0;
   private lastConfig: MatchConfig | null = null;
@@ -270,6 +273,7 @@ export class Game {
 
   private updatePlaying(dt: number) {
     this.time += dt;
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.8);
 
     if (this.input.keyPressed('Escape')) {
       if (this.buyMenu.isOpen) this.buyMenu.close();
@@ -552,6 +556,11 @@ export class Game {
     this.projectiles.push(new Projectile(this, opts));
   }
 
+  /** Add camera-shake trauma (clamped). Weapons, hits and blasts call this. */
+  shake(amount: number) {
+    this.shakeTrauma = Math.min(1, this.shakeTrauma + amount);
+  }
+
   applyDamage(target: Actor, info: DamageInfo) {
     if (this.mode === 'online') { this.applyDamageOnline(target, info); return; }
     // Cash Raid: no friendly fire (self-damage — rocket jumps — still lands).
@@ -567,7 +576,10 @@ export class Game {
         this.hud.showHitmarker(res.died);
         if (!res.died) this.audio.play('hitmarker');
       }
-      if (target === this.player) this.hud.showDamageFlash();
+      if (target === this.player) {
+        this.hud.showDamageFlash();
+        this.shake(0.18 + Math.min(0.4, res.dealt / 240));
+      }
     }
     if (res.died) this.onActorDied(target, info.attacker, info.weaponId, info.headshot);
   }
@@ -1025,6 +1037,9 @@ export class Game {
       if (np.id === this.localId) {
         const p = this.player;
         if (!p) continue;
+        if (np.health < p.health - 0.5 && p.alive) {
+          this.shake(0.18 + Math.min(0.4, (p.health - np.health) / 240));
+        }
         p.health = np.health;
         p.armor = np.armor;
         p.frags = np.frags;
@@ -1131,6 +1146,7 @@ export class Game {
         speed: spec.projectileSpeed ?? 40, life: spec.projectileLife ?? 5,
         directDamage: 0, splashRadius: spec.splashRadius ?? 3, splashDamage: 0,
         knockback: 0, color: weapon.color, cosmetic: true,
+        bounces: spec.bounces ?? 0,
       });
     } else {
       const range = spec.range ?? 200;
@@ -1234,6 +1250,7 @@ export class Game {
 
   private updateOnline(dt: number) {
     this.time += dt;
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.8);
     if (this.input.keyPressed('Escape')) {
       if (this.buyMenu.isOpen) this.buyMenu.close();
       else { this.pause(); return; }

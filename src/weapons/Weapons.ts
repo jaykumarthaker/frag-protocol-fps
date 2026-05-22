@@ -32,6 +32,13 @@ export interface FireSpec {
   splashDamage?: number;
   /** Knockback impulse magnitude applied by splash. */
   knockback?: number;
+  /** UT feel — all optional, unset = no change to classic behaviour. */
+  /** Wall bounces a projectile survives before it detonates. */
+  bounces?: number;
+  /** Seconds to wind up / fully charge this fire mode. */
+  chargeTime?: number;
+  /** Max shots that can be queued before a forced release (triple-rocket). */
+  queueMax?: number;
 }
 
 export interface WeaponDef {
@@ -65,6 +72,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
       spread: 0,
       range: 320,
       headshotMul: 2.0,
+      chargeTime: 0.14,
     },
   },
   shard: {
@@ -97,6 +105,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
       splashRadius: 2.4,
       splashDamage: 28,
       knockback: 8,
+      bounces: 2,
+      chargeTime: 0.9,
     },
   },
   rocket: {
@@ -119,6 +129,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
       splashRadius: 5.5,
       splashDamage: 95,
       knockback: 26,
+      queueMax: 3,
+      chargeTime: 0.2,
     },
   },
   pulse: {
