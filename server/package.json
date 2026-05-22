@@ -8,7 +8,6 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "frag-protocol": "file:..",
     "ws": "^8.18.0"
   }
 }

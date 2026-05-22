@@ -1,0 +1,30 @@
+name: Deploy Server to Railway
+
+# Deploys the server/ directory to Railway on every push to main.
+# Required GitHub secrets:
+#   RAILWAY_TOKEN       — from railway.app → Account Settings → Tokens
+#   RAILWAY_SERVICE_ID  — the service UUID shown in Railway dashboard → Settings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/railway-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@latest
+
+      - name: Deploy server to Railway
+        working-directory: server
+        run: railway up --service "$RAILWAY_SERVICE_ID" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}

@@ -50,7 +50,7 @@ export class Menu {
   private fragLimit = 20;
   private difficulty: MatchConfig['difficulty'] = 'skilled';
   private playerName = 'PLAYER';
-  private serverUrl = 'ws://localhost:2567';
+  private serverUrl = (import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://localhost:2567';
   private lobbyCfg: LobbyConfig = defaultLobbyConfig();
 
   constructor(parent: HTMLElement, handlers: MenuHandlers) {
@@ -249,7 +249,7 @@ export class Menu {
     this.container.appendChild(s);
     const grab = () => {
       this.playerName = ((s.querySelector('#o-name') as HTMLInputElement).value.trim() || 'PLAYER').slice(0, 14);
-      this.serverUrl = (s.querySelector('#o-url') as HTMLInputElement).value.trim() || 'ws://localhost:2567';
+      this.serverUrl = (s.querySelector('#o-url') as HTMLInputElement).value.trim() || this.serverUrl;
     };
     (s.querySelector('#o-create') as HTMLButtonElement).onclick = () => { grab(); this.showCreateRoom(); };
     (s.querySelector('#o-join') as HTMLButtonElement).onclick = () => { grab(); this.showJoinRoom(); };
@@ -379,7 +379,7 @@ export class Menu {
     this.container.appendChild(s);
     (s.querySelector('#j-go') as HTMLButtonElement).onclick = () => {
       this.playerName = ((s.querySelector('#j-name') as HTMLInputElement).value.trim() || 'PLAYER').slice(0, 14);
-      this.serverUrl = (s.querySelector('#j-url') as HTMLInputElement).value.trim() || 'ws://localhost:2567';
+      this.serverUrl = (s.querySelector('#j-url') as HTMLInputElement).value.trim() || this.serverUrl;
       const code = (s.querySelector('#j-code') as HTMLInputElement).value.trim().toUpperCase();
       this.h.onJoinRoom(this.serverUrl, this.playerName, code);
     };
