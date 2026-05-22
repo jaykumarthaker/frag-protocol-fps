@@ -101,6 +101,7 @@ export class RemotePlayer extends Actor {
   }
 
   protected override updateVisual(dt: number) {
+    this.robot.setWeapon(this.currentWeapon);
     this.robot.update(dt);
     this.robot.play((this.anim as RobotAnim) || 'Idle');
   }

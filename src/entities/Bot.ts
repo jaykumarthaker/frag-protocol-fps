@@ -51,6 +51,7 @@ export class Bot extends Actor {
   }
 
   protected override updateVisual(dt: number) {
+    this.robot.setWeapon(this.currentWeapon);
     this.robot.update(dt);
     let anim: RobotAnim;
     if (!this.alive) anim = 'Death';

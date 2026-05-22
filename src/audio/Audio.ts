@@ -96,13 +96,15 @@ export class Audio {
     if (!this.enabled || this.ctx.state !== 'running') return;
     const t = this.ctx.currentTime;
     switch (name) {
-      case 'railgun': this.beepShot(t, pos, 1400, 220, 0.28, 0.55); break;
-      case 'shard':   this.noiseShot(t, pos, 0.16, 1800, 0.5); break;
-      case 'rocket':  this.noiseShot(t, pos, 0.3, 500, 0.55); break;
-      case 'pulse':   this.beepShot(t, pos, 900, 600, 0.09, 0.3); break;
-      case 'orb':     this.beepShot(t, pos, 320, 520, 0.25, 0.35); break;
+      case 'railgun': this.railShot(t, pos); break;
+      case 'railcharge': this.railCharge(t, pos); break;
+      case 'rocketload': this.beepShot(t, pos, 220, 90, 0.07, 0.24); break;
+      case 'shard':   this.shardShot(t, pos); break;
+      case 'rocket':  this.rocketShot(t, pos); break;
+      case 'pulse':   this.pulseShot(t, pos); break;
+      case 'orb':     this.orbShot(t, pos); break;
       case 'explosion': this.explosion(t, pos); break;
-      case 'combo':     this.explosion(t, pos, 1.5); break;
+      case 'combo':     this.combo(t, pos); break;
       case 'hit':       this.beepShot(t, pos, 1100, 1100, 0.05, 0.25); break;
       case 'hitmarker': this.beepShot(t, undefined, 2000, 1700, 0.04, 0.3); break;
       case 'jumppad':   this.sweep(t, pos, 200, 1200, 0.35, 0.4); break;
@@ -186,6 +188,103 @@ export class Audio {
     thump.stop(t + 0.4);
   }
 
+  // ---- weapon synths -------------------------------------------------
+
+  /** A single oscillator voice with a pitch glide + decay (optional attack). */
+  private oscVoice(
+    t: number, pos: THREE.Vector3 | undefined,
+    type: OscillatorType, f0: number, f1: number,
+    vol: number, dur: number, attack = 0,
+  ) {
+    const osc = this.ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    const g = this.out(vol, pos);
+    const peak = Math.max(0.0009, g.gain.value);
+    if (attack > 0) {
+      g.gain.setValueAtTime(0.0008, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    } else {
+      g.gain.setValueAtTime(peak, t);
+    }
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    osc.connect(g);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  /** A filtered-noise voice with a swept cutoff. */
+  private noiseVoice(
+    t: number, pos: THREE.Vector3 | undefined,
+    filterType: BiquadFilterType, f0: number, f1: number,
+    q: number, vol: number, dur: number,
+  ) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(dur);
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = filterType;
+    filt.frequency.setValueAtTime(f0, t);
+    filt.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+    filt.Q.value = q;
+    const g = this.out(vol, pos);
+    g.gain.setValueAtTime(Math.max(0.0009, g.gain.value), t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    src.connect(filt);
+    filt.connect(g);
+    src.start(t);
+    src.stop(t + dur + 0.02);
+  }
+
+  /** Railgun — an electric crack + magnetic zap + a rolling thunder tail. */
+  private railShot(t: number, pos?: THREE.Vector3) {
+    this.oscVoice(t, pos, 'sawtooth', 2600, 220, 0.34, 0.2);          // zap
+    this.noiseVoice(t, pos, 'highpass', 2200, 900, 0.7, 0.42, 0.12);  // crack
+    this.oscVoice(t + 0.015, pos, 'sine', 170, 44, 0.5, 0.55, 0.03);  // thunder
+  }
+
+  /** Railgun wind-up — a rising electrical whine. */
+  private railCharge(t: number, pos?: THREE.Vector3) {
+    this.oscVoice(t, pos, 'sawtooth', 220, 1500, 0.24, 0.14, 0.05);
+    this.oscVoice(t, pos, 'sine', 440, 2400, 0.12, 0.14, 0.05);
+  }
+
+  /** Shard Cannon — a chunky flak burst with a crystalline shimmer. */
+  private shardShot(t: number, pos?: THREE.Vector3) {
+    this.noiseVoice(t, pos, 'bandpass', 1100, 700, 1.0, 0.5, 0.13);   // body
+    this.oscVoice(t, pos, 'square', 210, 70, 0.34, 0.1);              // thunk
+    for (let i = 0; i < 3; i++) {                                    // shimmer
+      this.oscVoice(t + i * 0.018, pos, 'triangle', 2800 + i * 240, 1900, 0.1, 0.06);
+    }
+  }
+
+  /** Rocket Launcher — a deep launch WHOOMP with an ignition whoosh. */
+  private rocketShot(t: number, pos?: THREE.Vector3) {
+    this.oscVoice(t, pos, 'sine', 300, 58, 0.55, 0.36, 0.02);         // whoomp
+    this.noiseVoice(t, pos, 'lowpass', 1300, 320, 0.8, 0.4, 0.3);     // whoosh
+    this.noiseVoice(t, pos, 'highpass', 2400, 1600, 0.6, 0.24, 0.07); // ignition
+  }
+
+  /** Pulse Rifle — a fast, bright plasma bolt (fires many times a second). */
+  private pulseShot(t: number, pos?: THREE.Vector3) {
+    this.oscVoice(t, pos, 'sawtooth', 1350, 430, 0.26, 0.08);
+    this.oscVoice(t, pos, 'square', 2700, 1500, 0.08, 0.05);
+  }
+
+  /** Pulse Rifle secondary — a deep, wobbling energy-orb launch. */
+  private orbShot(t: number, pos?: THREE.Vector3) {
+    this.oscVoice(t, pos, 'sine', 540, 170, 0.32, 0.24, 0.02);
+    this.oscVoice(t, pos, 'sawtooth', 270, 120, 0.16, 0.22);
+    this.oscVoice(t, pos, 'sine', 150, 90, 0.2, 0.24, 0.03);
+  }
+
+  /** Pulse combo detonation — the big blast plus an electric crack. */
+  private combo(t: number, pos?: THREE.Vector3) {
+    this.explosion(t, pos, 1.6);
+    this.oscVoice(t, pos, 'sawtooth', 3000, 500, 0.3, 0.25);
+    this.noiseVoice(t, pos, 'highpass', 3000, 1400, 0.7, 0.3, 0.18);
+  }
+
   // ---- announcer -----------------------------------------------------
 
   announce(text: string) {
@@ -204,7 +303,8 @@ export class Audio {
 }
 
 export type SfxName =
-  | 'railgun' | 'shard' | 'rocket' | 'pulse' | 'orb'
+  | 'railgun' | 'railcharge' | 'rocketload'
+  | 'shard' | 'rocket' | 'pulse' | 'orb'
   | 'explosion' | 'combo' | 'hit' | 'hitmarker'
   | 'jumppad' | 'pickup' | 'pickupbig' | 'jump' | 'dodge'
   | 'spawn' | 'die';

@@ -2,22 +2,36 @@ import * as THREE from 'three';
 import { Actor, ACTOR_EYE_OFFSET } from './Actor';
 import type { Game } from '../core/Game';
 import { forwardXZ, rightXZ, lookDir } from '../core/look';
-import { WEAPONS, WEAPON_ORDER, type WeaponDef } from '../weapons/Weapons';
+import { WEAPON_ORDER } from '../weapons/Weapons';
+import { createWeaponMesh, type WeaponMesh } from '../weapons/WeaponModels';
 
 const DODGE_TAP_WINDOW = 0.28;
 const PITCH_LIMIT = Math.PI / 2 - 0.04;
+/** Seconds between queued rockets, and the railgun's wind-up duration. */
+const ROCKET_LOAD_INTERVAL = 0.2;
+const RAIL_WINDUP = 0.14;
+const SHARD_CHARGE_TIME = 0.9;
 
 /** The human-controlled actor: input → movement intent, camera, viewmodel. */
 export class Player extends Actor {
   private camera: THREE.PerspectiveCamera;
   private viewmodelRoot = new THREE.Group();
-  private viewmodels: Record<string, THREE.Group> = {};
+  private viewmodels: Record<string, WeaponMesh> = {};
   private lastTap: Record<string, number> = {};
   private bobPhase = 0;
   private recoil = 0;
   private camRoll = 0;
   private fwdInput = 0;
   private strafeInput = 0;
+
+  // --- UT-feel weapon state ---
+  /** Rockets queued in the triple-rocket launcher (0..3). */
+  private rocketLoaded = 0;
+  private rocketLoadAt = 0;
+  /** Shard Cannon charged-secondary build-up (0..1). */
+  private shardCharge = 0;
+  /** game.time the railgun wind-up began (0 = not winding up). */
+  private railChargeStart = 0;
 
   constructor(game: Game, name: string, spawnFeet: THREE.Vector3, camera: THREE.PerspectiveCamera) {
     super(game, name, 0x36e0ff, spawnFeet);
@@ -28,7 +42,7 @@ export class Player extends Actor {
 
   private buildViewmodels() {
     for (const id of WEAPON_ORDER) {
-      const g = this.buildWeaponModel(id, WEAPONS[id]);
+      const g = createWeaponMesh(id);
       g.visible = false;
       this.viewmodelRoot.add(g);
       this.viewmodels[id] = g;
@@ -36,64 +50,25 @@ export class Player extends Actor {
     this.viewmodelRoot.position.set(0.34, -0.34, -0.72);
   }
 
-  /** A distinct low-poly viewmodel per weapon, with glowing accents. */
-  private buildWeaponModel(id: string, def: WeaponDef): THREE.Group {
-    const g = new THREE.Group();
-    const dark = new THREE.MeshStandardMaterial({ color: 0x171f2c, roughness: 0.45, metalness: 0.8 });
-    const mid = new THREE.MeshStandardMaterial({ color: 0x2c3748, roughness: 0.5, metalness: 0.65 });
-    const accent = new THREE.MeshStandardMaterial({
-      color: def.color, emissive: def.color, emissiveIntensity: 0.5, roughness: 0.3,
-    });
-    const part = (
-      geo: THREE.BufferGeometry, mat: THREE.Material,
-      x: number, y: number, z: number, rx = 0,
-    ) => {
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(x, y, z);
-      m.rotation.x = rx;
-      g.add(m);
-    };
-
-    part(new THREE.BoxGeometry(0.1, 0.22, 0.13), dark, 0, -0.13, 0.16); // grip
-
-    switch (id) {
-      case 'railgun':
-        part(new THREE.BoxGeometry(0.12, 0.13, 0.62), mid, 0, 0, -0.05);
-        part(new THREE.CylinderGeometry(0.035, 0.045, 0.72, 10), dark, 0, 0.02, -0.38, Math.PI / 2);
-        part(new THREE.BoxGeometry(0.06, 0.11, 0.26), dark, 0, 0.13, 0.0);
-        part(new THREE.CylinderGeometry(0.028, 0.028, 0.52, 8), accent, 0, 0.04, -0.32, Math.PI / 2);
-        break;
-      case 'shard':
-        part(new THREE.BoxGeometry(0.22, 0.16, 0.4), mid, 0, 0, -0.02);
-        part(new THREE.CylinderGeometry(0.07, 0.085, 0.34, 8), dark, -0.07, 0, -0.32, Math.PI / 2);
-        part(new THREE.CylinderGeometry(0.07, 0.085, 0.34, 8), dark, 0.07, 0, -0.32, Math.PI / 2);
-        part(new THREE.BoxGeometry(0.24, 0.05, 0.1), accent, 0, 0.1, -0.02);
-        break;
-      case 'rocket':
-        part(new THREE.BoxGeometry(0.16, 0.16, 0.4), mid, 0, 0, 0.02);
-        part(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 12), dark, 0, 0.03, -0.32, Math.PI / 2);
-        part(new THREE.ConeGeometry(0.085, 0.18, 12), accent, 0, 0.03, -0.52, -Math.PI / 2);
-        part(new THREE.TorusGeometry(0.13, 0.022, 8, 18), accent, 0, 0.03, -0.12);
-        break;
-      case 'pulse':
-        part(new THREE.BoxGeometry(0.14, 0.15, 0.5), mid, 0, 0, -0.04);
-        part(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 10), dark, 0, 0.04, -0.34, Math.PI / 2);
-        part(new THREE.SphereGeometry(0.085, 16, 12), accent, 0, 0.05, 0.07);
-        part(new THREE.BoxGeometry(0.045, 0.18, 0.05), accent, 0, 0.13, -0.12);
-        break;
-    }
-    return g;
+  /** Recoil + viewmodel kick after a successful shot — heavier per weapon. */
+  onFired(weaponId: string) {
+    const kick = weaponId === 'railgun' ? 1.0
+      : weaponId === 'rocket' ? 0.9
+      : weaponId === 'shard' ? 0.66
+      : 0.32; // pulse — a light buzz
+    this.recoil = Math.min(1.2, this.recoil + kick);
   }
-
-  /** Recoil + viewmodel kick after a successful shot. */
-  onFired() { this.recoil = Math.min(1, this.recoil + 0.7); }
 
   update(dt: number) {
     const input = this.game.input;
 
     if (!this.alive) {
       // freeze on death; Game runs the respawn timer
+      this.rocketLoaded = 0;
+      this.shardCharge = 0;
+      this.railChargeStart = 0;
       this.applyCamera(dt, 0);
+      this.updateViewmodel(dt);
       return;
     }
 
@@ -125,14 +100,75 @@ export class Player extends Actor {
     if (input.keyPressed('KeyQ')) this.cycleWeapon(1);
 
     // ---- firing ----
-    if (input.mouse(0)) {
-      if (this.game.weapons.fire(this, false)) this.onFired();
-    } else if (input.mouse(2)) {
-      if (this.game.weapons.fire(this, true)) this.onFired();
-    }
+    this.updateWeaponFire(dt);
 
     this.applyCamera(dt, s);
     this.updateViewmodel(dt);
+  }
+
+  /**
+   * Per-weapon firing — most weapons just fire on the mouse button, but the
+   * Rocket Launcher queues a triple salvo, the Shard Cannon charges its
+   * secondary, and the Railgun winds up briefly before its instant shot.
+   */
+  private updateWeaponFire(dt: number) {
+    const input = this.game.input;
+    const w = this.currentWeapon;
+    const primary = input.mouse(0);
+    const secondary = input.mouse(2);
+
+    // drop any queued / charged state when the weapon changed
+    if (w !== 'rocket') this.rocketLoaded = 0;
+    if (w !== 'shard') this.shardCharge = 0;
+    if (w !== 'railgun') this.railChargeStart = 0;
+
+    if (w === 'rocket') {
+      const ammo = this.ammo.rocket ?? 0;
+      if (primary && this.rocketLoaded < 3 && this.rocketLoaded < ammo &&
+          this.canFire() && this.game.time >= this.rocketLoadAt) {
+        this.rocketLoaded++;
+        this.rocketLoadAt = this.game.time + ROCKET_LOAD_INTERVAL;
+        this.game.audio.play('rocketload', this.position);
+      }
+      // release the salvo when the button is let go or the queue is full
+      if (this.rocketLoaded > 0 && (!primary || this.rocketLoaded >= 3)) {
+        if (this.game.weapons.fireRocketSalvo(this, this.rocketLoaded)) this.onFired('rocket');
+        this.rocketLoaded = 0;
+      }
+      return;
+    }
+
+    if (w === 'shard') {
+      if (primary && this.game.weapons.fire(this, false)) this.onFired('shard');
+      if (secondary && this.canFire() && (this.ammo.shard ?? 0) >= 2) {
+        this.shardCharge = Math.min(1, this.shardCharge + dt / SHARD_CHARGE_TIME);
+      } else if (this.shardCharge > 0) {
+        if (this.game.weapons.fire(this, true, this.shardCharge)) this.onFired('shard');
+        this.shardCharge = 0;
+      }
+      return;
+    }
+
+    if (w === 'railgun') {
+      // pressing fire commits a wind-up; the shot lands even if released early
+      if (this.railChargeStart === 0 && primary &&
+          this.canFire() && (this.ammo.railgun ?? 0) >= 1) {
+        this.railChargeStart = this.game.time;
+        this.game.audio.play('railcharge', this.position);
+      }
+      if (this.railChargeStart > 0 && this.game.time - this.railChargeStart >= RAIL_WINDUP) {
+        if (this.game.weapons.fire(this, false)) this.onFired('railgun');
+        this.railChargeStart = 0;
+      }
+      return;
+    }
+
+    // pulse + anything else: straightforward primary / secondary fire
+    if (primary) {
+      if (this.game.weapons.fire(this, false)) this.onFired(w);
+    } else if (secondary) {
+      if (this.game.weapons.fire(this, true)) this.onFired(w);
+    }
   }
 
   /** Double-tap a strafe/forward key to dodge in that direction. */
@@ -174,6 +210,18 @@ export class Player extends Actor {
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(eye.clone().add(dir));
     this.camera.rotateZ(this.camRoll);
+
+    // ---- camera shake (weapon kick, hits, nearby blasts) ----
+    const tr = this.game.shakeTrauma;
+    if (tr > 0.001) {
+      const s = tr * tr;
+      const t = this.game.time;
+      this.camera.position.x += Math.sin(t * 47.0) * 0.16 * s;
+      this.camera.position.y += Math.sin(t * 58.3) * 0.16 * s;
+      this.camera.position.z += Math.sin(t * 53.1) * 0.10 * s;
+      this.camera.rotateZ(Math.sin(t * 43.7) * 0.055 * s);
+      this.camera.rotateX(Math.sin(t * 61.2) * 0.045 * s);
+    }
   }
 
   private updateViewmodel(dt: number) {
@@ -189,6 +237,19 @@ export class Player extends Actor {
       -0.72 + this.recoil * 0.12,
     );
     this.viewmodelRoot.rotation.x = this.recoil * 0.35;
+
+    // drive the active weapon's idle animation; `energy` brightens its glow
+    // while a shot recoils or a charge / wind-up builds.
+    let energy = Math.min(1, this.recoil);
+    if (this.currentWeapon === 'shard') {
+      energy = Math.max(energy, this.shardCharge);
+    } else if (this.currentWeapon === 'rocket') {
+      energy = Math.max(energy, this.rocketLoaded / 3);
+    } else if (this.currentWeapon === 'railgun' && this.railChargeStart > 0) {
+      energy = Math.max(energy, Math.min(1, (this.game.time - this.railChargeStart) / RAIL_WINDUP));
+    }
+    const vm = this.viewmodels[this.currentWeapon];
+    if (vm) vm.userData.animate(this.game.time, energy);
   }
 
   /** World position of the camera eye (for HUD / spectator math). */

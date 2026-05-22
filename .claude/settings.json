@@ -21,7 +21,16 @@
       "Bash(git ls-tree *)",
       "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\server.mjs\")",
       "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\room.mjs\")",
-      "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\botbrain.mjs\")"
+      "Bash(node --check \"d:\\\\temp\\\\frag-protocol-fps\\\\server\\\\botbrain.mjs\")",
+      "Bash(Get-ChildItem -Path \"d:\\\\temp\\\\frag-protocol-fps\" -Directory)",
+      "Bash(node --check server/server.mjs)",
+      "Bash(node --check server/room.mjs)",
+      "Bash(node --check server/botbrain.mjs)",
+      "Bash(node --check server/cashraid-map.mjs)",
+      "Bash(curl -s -o nul -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(jobs -p)",
+      "Bash(xargs -r kill)"
     ]
   }
 }
