@@ -149,7 +149,7 @@ export class BotBrain {
     const to = other.eyePosition();
     const d = to.clone().sub(from);
     const dist = d.length();
-    if (dist > 86) return false;
+    if (dist > 130) return false;
     if (dist < 0.001) return true;
     d.multiplyScalar(1 / dist);
     return !this.game.physics.raycastWorld(from, d, dist - 0.4);
