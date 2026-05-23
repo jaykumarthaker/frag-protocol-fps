@@ -7,7 +7,7 @@
  * clients report transforms and request actions. See src/net/protocol.ts.
  */
 import { WebSocketServer } from 'ws';
-import { Room } from './room.mjs';
+import { Room, sanitiseCharacter } from './room.mjs';
 
 const PORT = Number(process.env.PORT) || 2567;
 const TICK_MS = 50; // 20 Hz
@@ -68,7 +68,7 @@ wss.on('connection', (ws) => {
         const code = genCode();
         room = new Room(code, sanitiseConfig(msg.config));
         rooms.set(code, room);
-        player = room.addHuman(ws, msg.name);
+        player = room.addHuman(ws, msg.name, msg.character);
         send(ws, { t: 'roomJoined', code, youId: player.id, host: true });
         room.broadcastLobby();
         console.log(`+ room ${code} created (${room.config.mode})`);
@@ -82,7 +82,7 @@ wss.on('connection', (ws) => {
           send(ws, { t: 'roomError', message: 'room is full' }); return;
         }
         room = target;
-        player = room.addHuman(ws, msg.name);
+        player = room.addHuman(ws, msg.name, msg.character);
         send(ws, { t: 'roomJoined', code, youId: player.id, host: player.id === room.hostId });
         room.broadcastLobby();
       } else {
@@ -99,6 +99,12 @@ wss.on('connection', (ws) => {
         break;
       case 'lobbySetReady':
         if (room.phase === 'lobby') { player.ready = !!msg.ready; room.broadcastLobby(); }
+        break;
+      case 'lobbySetCharacter':
+        if (room.phase === 'lobby' && typeof msg.character === 'string') {
+          player.character = sanitiseCharacter(msg.character);
+          room.broadcastLobby();
+        }
         break;
       case 'lobbySelectTeam':
         if (room.phase === 'lobby' && (msg.team === 1 || msg.team === 2)) {
