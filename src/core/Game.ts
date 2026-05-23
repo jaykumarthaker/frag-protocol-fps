@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Physics } from '../physics/Physics';
 import { Arena } from '../arena/Arena';
 import { CashRaidArena } from '../arena/CashRaidArena';
+import { MAPS, getMap } from '../arena/MapRegistry';
 import { Input } from './Input';
 import { Audio } from '../audio/Audio';
 import { Effects } from '../effects/Effects';
@@ -360,7 +361,7 @@ export class Game {
     this.clearMatch();
     this.lastConfig = config;
     this.gameMode = config.mode;
-    this.ensureArena(config.mode);
+    this.ensureArena(config.mode, config.mapId);
     this.firstBloodDone = false;
     this.time = 0;
 
@@ -462,15 +463,17 @@ export class Game {
     return this.arena instanceof CashRaidArena ? this.arena : null;
   }
 
-  /** Swap the live arena so it matches the requested game mode. */
-  private ensureArena(mode: GameMode) {
-    const wantCash = mode === 'cashraid';
-    if (wantCash === (this.arena instanceof CashRaidArena)) return;
-    this.arena.dispose();
-    this.arena = wantCash
-      ? new CashRaidArena(this.scene, this.physics)
-      : new Arena(this.scene, this.physics);
+  /** Id of the currently-built map, used to detect when a swap is needed. */
+  private currentMapId: string | null = null;
+
+  /** Swap the live arena to the requested map (lookup via the registry). */
+  private ensureArena(mode: GameMode, mapId?: string) {
+    const def = getMap(mapId, mode);
+    if (this.currentMapId === def.id) return;
+    if (this.arena) this.arena.dispose();
+    this.arena = def.factory(this.scene, this.physics);
     this.arena.build();
+    this.currentMapId = def.id;
   }
 
   private restart() {
@@ -1037,7 +1040,7 @@ export class Game {
     this.localId = msg.youId;
     this.time = 0;
     this.firstBloodDone = false;
-    this.ensureArena(this.gameMode);
+    this.ensureArena(this.gameMode, msg.match.mapId);
 
     // Pre-load every character the match needs (local + remotes + bots).
     const needed = new Set<string>([this.characterId]);

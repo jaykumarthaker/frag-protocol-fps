@@ -36,6 +36,12 @@ function sanitiseConfig(raw) {
   };
   const mode = r.mode === 'cashraid' ? 'cashraid' : 'deathmatch';
   const diff = ['rookie', 'skilled', 'deadly'].includes(r.difficulty) ? r.difficulty : 'skilled';
+  // Map allowlist — must stay in sync with src/arena/MapRegistry.ts.
+  const dmMaps = ['atrium', 'duel'];
+  const crMaps = ['cashraid'];
+  const validMaps = mode === 'cashraid' ? crMaps : dmMaps;
+  const mapId = validMaps.includes(r.mapId) ? r.mapId
+    : (mode === 'cashraid' ? 'cashraid' : 'atrium');
   return {
     mode,
     maxPlayers: num(r.maxPlayers, 2, 12, 8),
@@ -46,6 +52,7 @@ function sanitiseConfig(raw) {
     startMoney: num(r.startMoney, 0, 100000, 20000),
     winTarget: num(r.winTarget, 10000, 1000000, 100000),
     isPublic: !!r.isPublic,
+    mapId,
   };
 }
 

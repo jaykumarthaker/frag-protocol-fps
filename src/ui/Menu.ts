@@ -8,6 +8,7 @@ import {
   CHARACTERS, loadCharacter, createCharacter, isCharacterAvailable,
   type CharacterInstance,
 } from '../core/Models';
+import { mapsForMode, DEFAULT_MAP } from '../arena/MapRegistry';
 
 /** Cash Raid economy defaults used for offline / instant-action matches. */
 export const CASHRAID_START_MONEY = 20000;
@@ -44,7 +45,7 @@ function defaultLobbyConfig(): LobbyConfig {
   return {
     mode: 'cashraid', maxPlayers: 8, durationSec: 900, botCount: 4,
     fragLimit: 25, difficulty: 'skilled', startMoney: 20000,
-    winTarget: 100000, isPublic: true,
+    winTarget: 100000, isPublic: true, mapId: DEFAULT_MAP.cashraid,
   };
 }
 
@@ -58,6 +59,11 @@ export class Menu {
   private botCount = 4;
   private fragLimit = 20;
   private difficulty: MatchConfig['difficulty'] = 'skilled';
+  /** Last-chosen map per mode, remembered while the menu is open. */
+  private mapByMode: Record<GameMode, string> = {
+    deathmatch: DEFAULT_MAP.deathmatch,
+    cashraid: DEFAULT_MAP.cashraid,
+  };
   private playerName = 'PLAYER';
   private serverUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:2567';
   private lobbyCfg: LobbyConfig = defaultLobbyConfig();
@@ -89,6 +95,10 @@ export class Menu {
             <button data-m="deathmatch">Deathmatch</button>
             <button data-m="cashraid">Cash Raid</button>
           </div>
+        </div>
+        <div class="field" id="m-map-field">
+          <label>Map</label>
+          <select id="m-map" class="menu-select"></select>
         </div>
         <div class="field">
           <label>Opponents</label>
@@ -174,7 +184,25 @@ export class Menu {
 
     const modeSeg = s.querySelector('#m-mode')!;
     const fragsField = s.querySelector('#m-frags-field') as HTMLElement;
+    const mapField = s.querySelector('#m-map-field') as HTMLElement;
+    const mapSel = s.querySelector('#m-map') as HTMLSelectElement;
     const startBtn = s.querySelector('#m-start') as HTMLButtonElement;
+
+    const refreshMaps = () => {
+      const maps = mapsForMode(this.mode);
+      mapSel.innerHTML = maps
+        .map((m) => `<option value="${m.id}" title="${m.description}">${m.name}</option>`)
+        .join('');
+      // If our remembered pick isn't valid for this mode, fall back to default.
+      if (!maps.some((m) => m.id === this.mapByMode[this.mode])) {
+        this.mapByMode[this.mode] = DEFAULT_MAP[this.mode];
+      }
+      mapSel.value = this.mapByMode[this.mode];
+      // Hide the field if there's only one option.
+      mapField.style.display = maps.length > 1 ? '' : 'none';
+    };
+    mapSel.onchange = () => { this.mapByMode[this.mode] = mapSel.value; };
+
     const paintMode = () => {
       modeSeg.querySelectorAll('button').forEach((b) => {
         b.classList.toggle('on', (b as HTMLElement).dataset.m === this.mode);
@@ -182,6 +210,7 @@ export class Menu {
       // frag limit is meaningless in Cash Raid
       fragsField.style.display = this.mode === 'cashraid' ? 'none' : '';
       startBtn.textContent = this.mode === 'cashraid' ? 'Raid' : 'Enter Arena';
+      refreshMaps();
     };
     modeSeg.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => {
@@ -198,6 +227,7 @@ export class Menu {
         fragLimit: this.fragLimit,
         timeLimitSec: this.mode === 'cashraid' ? 900 : 600,
         difficulty: this.difficulty,
+        mapId: this.mapByMode[this.mode],
       };
       if (this.mode === 'cashraid') {
         cfg.startMoney = CASHRAID_START_MONEY;
@@ -372,6 +402,8 @@ export class Menu {
           <button data-m="cashraid">Cash Raid</button>
           <button data-m="deathmatch">Deathmatch</button>
         </div></div>
+      <div class="field" id="c-map-field"><label>Map</label>
+        <select id="c-map" class="menu-select"></select></div>
       <div class="field"><label>Max players</label>
         <input type="range" id="c-max" min="2" max="12" step="1" value="${cfg.maxPlayers}">
         <span class="val" id="c-max-v">${cfg.maxPlayers}</span></div>
@@ -408,6 +440,20 @@ export class Menu {
     range('c-money', (v) => { cfg.startMoney = v * 1000; });
     range('c-frag', (v) => { cfg.fragLimit = v; });
     const modeSeg = s.querySelector('#c-mode');
+    const mapSel = s.querySelector('#c-map') as HTMLSelectElement | null;
+    const mapField = s.querySelector('#c-map-field') as HTMLElement | null;
+    const refreshMaps = () => {
+      if (!mapSel) return;
+      const maps = mapsForMode(cfg.mode);
+      mapSel.innerHTML = maps
+        .map((m) => `<option value="${m.id}" title="${m.description}">${m.name}</option>`)
+        .join('');
+      if (!maps.some((m) => m.id === cfg.mapId)) cfg.mapId = DEFAULT_MAP[cfg.mode];
+      mapSel.value = cfg.mapId;
+      if (mapField) mapField.style.display = maps.length > 1 ? '' : 'none';
+    };
+    if (mapSel) mapSel.onchange = () => { cfg.mapId = mapSel.value; };
+
     const paint = () => {
       modeSeg?.querySelectorAll('button').forEach((b) =>
         b.classList.toggle('on', (b as HTMLElement).dataset.m === cfg.mode));
@@ -415,6 +461,7 @@ export class Menu {
         ((e as HTMLElement).style.display = cfg.mode === 'cashraid' ? '' : 'none'));
       s.querySelectorAll('.dm-only').forEach((e) =>
         ((e as HTMLElement).style.display = cfg.mode === 'deathmatch' ? '' : 'none'));
+      refreshMaps();
     };
     modeSeg?.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => {
