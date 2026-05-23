@@ -29,7 +29,8 @@ export class Pickup {
   private active = true;
   private respawnAt = 0;
   private spin = Math.random() * Math.PI * 2;
-  private icon: THREE.Mesh;
+  private icon: THREE.Object3D;
+  private iconMat: THREE.Material;
   private light?: THREE.PointLight;
 
   constructor(game: Game, type: PickupType, pos: THREE.Vector3) {
@@ -46,7 +47,8 @@ export class Pickup {
       roughness: 0.35,
       metalness: 0.4,
     });
-    this.icon = new THREE.Mesh(this.iconGeometry(type), mat);
+    this.iconMat = mat;
+    this.icon = buildIcon(type, mat);
     this.group.add(this.icon);
 
     // ground halo
@@ -66,16 +68,6 @@ export class Pickup {
       this.group.add(this.light);
     }
     game.scene.add(this.group);
-  }
-
-  private iconGeometry(type: PickupType): THREE.BufferGeometry {
-    switch (type) {
-      case 'health':      return new THREE.OctahedronGeometry(0.4);
-      case 'health_mega': return new THREE.OctahedronGeometry(0.6);
-      case 'armor':       return new THREE.IcosahedronGeometry(0.45);
-      case 'ammo':        return new THREE.BoxGeometry(0.6, 0.5, 0.6);
-      case 'amp':         return new THREE.TorusKnotGeometry(0.3, 0.12, 64, 8);
-    }
   }
 
   update(dt: number) {
@@ -144,7 +136,87 @@ export class Pickup {
   /** Remove from the scene and free GPU resources (match cleanup). */
   dispose() {
     this.game.scene.remove(this.group);
-    this.icon.geometry.dispose();
-    (this.icon.material as THREE.Material).dispose();
+    this.icon.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+    });
+    this.iconMat.dispose();
   }
+}
+
+// ----- icon builders -------------------------------------------------
+// All icons share the caller-provided material so the entire pickup
+// renders as a single emissive colour. Each builder returns a Group
+// composed of simple primitives so the silhouette reads at a glance.
+
+function buildIcon(type: PickupType, mat: THREE.Material): THREE.Object3D {
+  switch (type) {
+    case 'health':      return crossIcon(0.55, 0.18, mat);
+    case 'health_mega': return crossIcon(0.85, 0.28, mat, true);
+    case 'armor':       return shieldIcon(mat);
+    case 'ammo':        return cartridgeIcon(mat);
+    case 'amp':         return new THREE.Mesh(
+      new THREE.TorusKnotGeometry(0.3, 0.12, 64, 8), mat,
+    );
+  }
+}
+
+/** Two crossed bars = a + sign. A third bar along Z makes it 3D so the
+ *  icon reads even when viewed from above. The optional ball at the
+ *  centre is reserved for mega-health. */
+function crossIcon(
+  size: number, thick: number, mat: THREE.Material, withBall = false,
+): THREE.Group {
+  const g = new THREE.Group();
+  const bar = (sx: number, sy: number, sz: number) => {
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat));
+  };
+  bar(size, thick, thick);
+  bar(thick, size, thick);
+  bar(thick, thick, size);
+  if (withBall) {
+    const c = new THREE.Mesh(new THREE.SphereGeometry(thick * 0.95, 16, 12), mat);
+    g.add(c);
+  }
+  return g;
+}
+
+/** A short, chunky shield silhouette extruded from a pentagon. */
+function shieldIcon(mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0.55);
+  shape.lineTo(0.45, 0.3);
+  shape.lineTo(0.45, -0.15);
+  shape.lineTo(0, -0.5);
+  shape.lineTo(-0.45, -0.15);
+  shape.lineTo(-0.45, 0.3);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.2,
+    bevelEnabled: true,
+    bevelSize: 0.04,
+    bevelThickness: 0.04,
+    bevelSegments: 2,
+    curveSegments: 4,
+  });
+  geo.translate(0, 0, -0.1);
+  g.add(new THREE.Mesh(geo, mat));
+  return g;
+}
+
+/** Two stubby bullet cartridges side-by-side — bullet body + cone tip. */
+function cartridgeIcon(mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const make = (x: number) => {
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.4, 12), mat);
+    body.position.set(x, -0.08, 0);
+    g.add(body);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 12), mat);
+    tip.position.set(x, 0.23, 0);
+    g.add(tip);
+  };
+  make(-0.13);
+  make(0.13);
+  return g;
 }
