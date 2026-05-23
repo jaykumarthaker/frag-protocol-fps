@@ -331,24 +331,25 @@ function findRightHand(root: THREE.Object3D): THREE.Object3D | null {
 
 /** Create an independent animated character. Team / player colour is shown
  *  externally (halo ring + name tag) — the model itself keeps its original
- *  materials and textures so each character reads as visually distinct. */
-export function createCharacter(id: string, _colorHex: number): CharacterInstance {
+ *  materials and textures so each character reads as visually distinct.
+ *  `castShadow` lets the caller opt out for non-player actors on the
+ *  fast quality tier (skinned-mesh shadows are the single biggest GPU cost). */
+export function createCharacter(
+  id: string, _colorHex: number, castShadow = true,
+): CharacterInstance {
   let lc = cache.get(id) ?? fallback;
   if (!lc) throw new Error('Models.loadModels() has not finished');
 
   const root = cloneSkeleton(lc.scene) as THREE.Group;
   root.scale.setScalar(lc.fitScale);
 
-  // Clone materials per-instance so future per-actor tweaks (e.g. damage
-  // flashes) don't bleed across actors, but don't recolour them.
+  // Re-use the source materials across all clones of the same character —
+  // we no longer recolour per-actor, so a shared material lets Three.js
+  // batch draw calls and saves the per-instance material clone.
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    mesh.castShadow = true;
-    const src = mesh.material as THREE.MeshStandardMaterial;
-    if (src && src.isMeshStandardMaterial) {
-      mesh.material = src.clone();
-    }
+    mesh.castShadow = castShadow;
   });
 
   const handBone = findRightHand(root);

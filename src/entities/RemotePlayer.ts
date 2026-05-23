@@ -25,7 +25,9 @@ export class RemotePlayer extends Actor {
     super(game, np.name, np.color, new THREE.Vector3(np.x, np.y, np.z));
     this.netId = np.id;
     this.characterId = np.character || 'robot';
-    this.robot = createCharacter(this.characterId, np.color);
+    this.robot = createCharacter(
+      this.characterId, np.color, game.settings.quality === 'high',
+    );
     this.mesh.add(this.robot.root);
     this.mesh.add(createHalo(np.color));
     this.mesh.add(makeNameTag(np.name, np.color));

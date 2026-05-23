@@ -23,7 +23,9 @@ export class Bot extends Actor {
     this.characterId = characterId;
     this.brain = new BotBrain(this, game, difficulty);
 
-    this.robot = createCharacter(characterId, colorHex);
+    this.robot = createCharacter(
+      characterId, colorHex, game.settings.quality === 'high',
+    );
     this.mesh.add(this.robot.root);
     this.mesh.add(createHalo(colorHex));
     this.mesh.add(makeNameTag(this.name, colorHex));

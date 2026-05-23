@@ -18,6 +18,13 @@ export interface GameSettings {
   sensitivity: number;
   volume: number;
   fov: number;
+  /**
+   * 'fast' — disables bloom, drops shadow resolution, caps pixel ratio at
+   *          1.25, and skips shadows on bot/remote characters. Aimed at
+   *          consistent 60+ FPS on mid-range hardware.
+   * 'high' — restores the original bloom + 2k shadow look.
+   */
+  quality: 'fast' | 'high';
 }
 
 export interface MenuHandlers {
@@ -37,6 +44,8 @@ export interface MenuHandlers {
   onCharacter: (id: string) => void;
   /** Read the player's current character id (for hydrating the select UI). */
   getCharacter: () => string;
+  /** Save a new graphics-quality choice (takes effect on next page load). */
+  onQuality: (q: GameSettings['quality']) => void;
   settings: GameSettings;
 }
 
@@ -650,6 +659,7 @@ export class Menu {
     this.clear();
     const s = document.createElement('div');
     s.className = 'screen';
+    const q = this.h.settings.quality;
     s.innerHTML = `
       <div class="logo" style="font-size:48px;">PAUSED</div>
       <div class="menu-card" style="min-width:360px;">
@@ -663,6 +673,16 @@ export class Menu {
           <label>Volume</label>
           <input type="range" id="p-vol" min="0" max="1" step="0.05" value="${this.h.settings.volume}">
           <span class="val" id="p-vol-v">${Math.round(this.h.settings.volume * 100)}</span>
+        </div>
+        <div class="field">
+          <label>Graphics</label>
+          <div class="seg" id="p-qual">
+            <button data-q="fast" class="${q === 'fast' ? 'on' : ''}">Fast</button>
+            <button data-q="high" class="${q === 'high' ? 'on' : ''}">High</button>
+          </div>
+        </div>
+        <div class="help" id="p-qual-note" style="margin-top:0;font-size:11px;">
+          Fast: no bloom, lower shadows, capped pixel ratio. <b>Reload to apply.</b>
         </div>
         <div class="btn-row">
           <button class="primary" id="p-resume">Resume</button>
@@ -686,6 +706,15 @@ export class Menu {
       this.h.settings.volume = +vol.value;
       volV.textContent = String(Math.round(+vol.value * 100));
     };
+
+    const qualSeg = s.querySelector('#p-qual')!;
+    qualSeg.querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => {
+        const v = (b as HTMLElement).dataset.q as GameSettings['quality'];
+        qualSeg.querySelectorAll('button').forEach((bb) =>
+          bb.classList.toggle('on', (bb as HTMLElement).dataset.q === v));
+        this.h.onQuality(v);
+      }));
     (s.querySelector('#p-resume') as HTMLButtonElement).onclick = () => this.h.onResume();
     (s.querySelector('#p-restart') as HTMLButtonElement).onclick = () => this.h.onRestart();
     (s.querySelector('#p-menu') as HTMLButtonElement).onclick = () => this.h.onMainMenu();
