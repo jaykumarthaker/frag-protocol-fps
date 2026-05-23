@@ -23,7 +23,9 @@ jobs:
         run: npm install -g @railway/cli@latest
 
       - name: Deploy server to Railway
-        working-directory: server
+        # Upload the full repo root: the Railway service has rootDirectory
+        # set to /server, so scoping `working-directory: server` here would
+        # double-nest the path and the build would look for server/server/.
         run: railway up --service "$RAILWAY_SERVICE_ID" --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
