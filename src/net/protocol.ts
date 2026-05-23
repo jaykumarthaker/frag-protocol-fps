@@ -28,6 +28,8 @@ export interface NetPlayer {
   carried: number;
   moneyBanked: number;
   moneyStolen: number;
+  /** Character model id (registry key in `core/Models.ts`). */
+  character: string;
 }
 
 export interface NetMatch {
@@ -65,6 +67,7 @@ export interface LobbyMember {
   ready: boolean;
   isHost: boolean;
   isBot: boolean;
+  character: string;
 }
 
 /** Full pre-match lobby state, re-broadcast on any change. */
@@ -103,8 +106,9 @@ export type ServerMsg =
 
 // ---- client -> server ----
 export type ClientMsg =
-  | { t: 'createRoom'; name: string; config: LobbyConfig }
-  | { t: 'joinRoom'; code: string; name: string }
+  | { t: 'createRoom'; name: string; config: LobbyConfig; character?: string }
+  | { t: 'joinRoom'; code: string; name: string; character?: string }
+  | { t: 'lobbySetCharacter'; character: string }
   | { t: 'leaveRoom' }
   | { t: 'lobbySetReady'; ready: boolean }
   | { t: 'lobbySelectTeam'; team: Team }

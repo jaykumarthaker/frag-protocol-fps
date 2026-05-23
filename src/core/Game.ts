@@ -26,7 +26,7 @@ import { BuyMenu } from '../ui/BuyMenu';
 import { NetClient } from '../net/NetClient';
 import type { ServerMsg, NetPlayer, LobbyConfig } from '../net/protocol';
 import { WEAPONS, WEAPON_ORDER } from '../weapons/Weapons';
-import { loadModels } from './Models';
+import { loadModels, loadCharacter, CHARACTERS, DEFAULT_CHARACTER_ID } from './Models';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -37,6 +37,27 @@ const WEAPON_LABEL: Record<string, string> = {
   railgun: 'RAILGUN', shard: 'SHARD CANNON', rocket: 'ROCKET',
   pulse: 'PULSE RIFLE', pulse_combo: 'PULSE COMBO', void: 'THE VOID',
 };
+
+/** Persist the player's character pick across sessions. */
+const CHARACTER_LS_KEY = 'fp.character';
+function loadStoredCharacter(): string {
+  try {
+    const v = localStorage.getItem(CHARACTER_LS_KEY);
+    if (v && CHARACTERS.some((c) => c.id === v)) return v;
+  } catch { /* localStorage may be unavailable */ }
+  return DEFAULT_CHARACTER_ID;
+}
+function saveStoredCharacter(id: string) {
+  try { localStorage.setItem(CHARACTER_LS_KEY, id); } catch { /* ignore */ }
+}
+
+/** Deterministic per-bot character pick (skipping the default robot) seeded
+ *  by the bot's index, so the same lineup looks the same each round. */
+function botCharacter(seed: number): string {
+  const pool = CHARACTERS.filter((c) => c.id !== DEFAULT_CHARACTER_ID);
+  if (pool.length === 0) return DEFAULT_CHARACTER_ID;
+  return pool[seed % pool.length].id;
+}
 
 const BOT_NAMES = ['VEX', 'RAZE', 'NOVA', 'KILO', 'ZERO', 'ORYX', 'BANE'];
 const BOT_COLORS = [0xff7a18, 0xff3b3b, 0xb98bff, 0x6dff8a, 0xffd23f, 0xff5ec4, 0x5ec8ff];
@@ -92,6 +113,8 @@ export class Game {
   gameMode: GameMode = 'deathmatch';
   time = 0;
   settings: GameSettings = { sensitivity: 1.0, volume: 0.7, fov: 95 };
+  /** The character the local player picked on the character-select screen. */
+  characterId: string = loadStoredCharacter();
 
   /** Camera-shake "trauma" (0..1); decays each frame, read by `Player`. */
   shakeTrauma = 0;
@@ -155,6 +178,8 @@ export class Game {
       onLobbyConfig: (c) => g.lobbyConfig(c),
       onLobbyKick: (id) => g.lobbyKick(id),
       onLobbyStart: () => g.lobbyStart(),
+      onCharacter: (id) => g.setCharacter(id),
+      getCharacter: () => g.characterId,
     });
 
     g.input.onPointerUnlock = () => { if (g.state === 'playing') g.pause(); };
@@ -331,7 +356,7 @@ export class Game {
   //  match lifecycle
   // ===================================================================
 
-  private startMatch(config: MatchConfig) {
+  private async startMatch(config: MatchConfig) {
     this.clearMatch();
     this.lastConfig = config;
     this.gameMode = config.mode;
@@ -348,7 +373,14 @@ export class Game {
     // team 1 takes the extra slot when the headcount is odd.
     const team1Count = Math.ceil((1 + config.botCount) / 2);
 
+    // Pre-load any character meshes this match will need so spawning is
+    // synchronous and there's no first-paint pop-in.
+    const needed = new Set<string>([this.characterId]);
+    for (let i = 0; i < config.botCount; i++) needed.add(botCharacter(i));
+    await Promise.all([...needed].map((id) => loadCharacter(id)));
+
     this.player = new Player(this, 'YOU', spawns[0], this.camera);
+    this.player.characterId = this.characterId;
     this.player.team = cashRaid ? 1 : 0;
     this.actors.push(this.player);
 
@@ -362,6 +394,7 @@ export class Game {
         color,
         spawns[(i + 1) % spawns.length],
         config.difficulty,
+        botCharacter(i),
       );
       bot.team = team;
       this.actors.push(bot);
@@ -872,13 +905,28 @@ export class Game {
   /** Connect, then create a room with the given lobby config. */
   async createRoom(url: string, name: string, config: LobbyConfig) {
     const net = await this.connectServer(url, name);
-    net?.send({ t: 'createRoom', name: this.onlineName, config });
+    net?.send({ t: 'createRoom', name: this.onlineName, config, character: this.characterId });
   }
 
   /** Connect, then join an existing room by invite code. */
   async joinRoom(url: string, name: string, code: string) {
     const net = await this.connectServer(url, name);
-    net?.send({ t: 'joinRoom', code: code.toUpperCase().trim(), name: this.onlineName });
+    net?.send({
+      t: 'joinRoom',
+      code: code.toUpperCase().trim(),
+      name: this.onlineName,
+      character: this.characterId,
+    });
+  }
+
+  /** Persist the player's character pick + notify the server when online. */
+  setCharacter(id: string) {
+    if (!CHARACTERS.some((c) => c.id === id)) return;
+    this.characterId = id;
+    saveStoredCharacter(id);
+    if (this.net && this.net.connected) {
+      this.net.send({ t: 'lobbySetCharacter', character: id });
+    }
   }
 
   private async connectServer(url: string, name: string): Promise<NetClient | null> {
@@ -958,7 +1006,7 @@ export class Game {
     this.menu.showOnlineHub('you were removed from the room');
   }
 
-  private onMatchStart(msg: Extract<ServerMsg, { t: 'matchStart' }>) {
+  private async onMatchStart(msg: Extract<ServerMsg, { t: 'matchStart' }>) {
     this.clearMatch(true);
     this.mode = 'online';
     this.gameMode = msg.match.mode;
@@ -966,6 +1014,11 @@ export class Game {
     this.time = 0;
     this.firstBloodDone = false;
     this.ensureArena(this.gameMode);
+
+    // Pre-load every character the match needs (local + remotes + bots).
+    const needed = new Set<string>([this.characterId]);
+    for (const np of msg.players) needed.add(np.character || 'robot');
+    await Promise.all([...needed].map((id) => loadCharacter(id)));
 
     const cfg: MatchConfig = {
       mode: this.gameMode, botCount: 0, fragLimit: msg.match.fragLimit,
@@ -991,6 +1044,7 @@ export class Game {
       ? new THREE.Vector3(me.x, me.y, me.z)
       : this.arena.spawnPoints[0].clone();
     this.player = new Player(this, me?.name ?? this.onlineName, feet, this.camera);
+    this.player.characterId = me?.character || this.characterId;
     this.player.team = me?.team ?? 0;
     this.player.loadout = this.gameMode === 'cashraid'
       ? new Set(['pulse']) : new Set(WEAPON_ORDER);

@@ -21,6 +21,25 @@ const DM_SPAWNS = [
 const COLORS = [0x36e0ff, 0xff7a18, 0xff3b3b, 0xb98bff, 0x6dff8a, 0xffd23f, 0xff5ec4, 0x5ec8ff];
 const TEAM_COLOR = { 1: 0x36e0ff, 2: 0xff9a3c };
 const BOT_NAMES = ['VEX', 'RAZE', 'NOVA', 'KILO', 'ZERO', 'ORYX', 'BANE', 'ECHO'];
+/** Character ids the server is willing to accept / pick. Must stay in sync
+ *  with the CHARACTERS registry in src/core/Models.ts. */
+export const CHARACTER_IDS = [
+  'robot',
+  'soldier_m', 'soldier_f', 'bluesoldier_m', 'bluesoldier_f',
+  'knight_m', 'knight_gold_m', 'knight_gold_f',
+  'ninja_m', 'ninja_f', 'ninja_sand',
+  'pirate_m', 'pirate_f',
+  'viking_m', 'viking_f',
+  'goblin_m', 'goblin_f',
+  'cowboy_m', 'cowboy_f',
+  'wizard', 'witch', 'elf',
+  'zombie_m', 'zombie_f',
+  'kimono_m', 'kimono_f',
+  'suit_m', 'suit_f',
+];
+export function sanitiseCharacter(id) {
+  return CHARACTER_IDS.includes(id) ? id : 'robot';
+}
 
 /** Buy catalogue — mirrors src/game/shop.ts. */
 const SHOP = {
@@ -75,12 +94,13 @@ export class Room {
   // ---- lobby ----------------------------------------------------------
 
   /** Add a human player to the lobby. Returns the player record. */
-  addHuman(ws, name) {
+  addHuman(ws, name, character) {
     const id = nextPlayerId++;
     const p = {
       id, ws, isBot: false,
       name: String(name || 'PLAYER').slice(0, 14).toUpperCase() || 'PLAYER',
       color: COLORS[(id - 1) % COLORS.length],
+      character: sanitiseCharacter(character),
       team: 0, ready: false,
       x: 0, y: 0.05, z: 0, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0,
       weapon: 'pulse', anim: 'Idle',
@@ -126,6 +146,7 @@ export class Room {
         .map((p) => ({
           id: p.id, name: p.name, team: p.team,
           ready: p.ready, isHost: p.id === this.hostId, isBot: false,
+          character: p.character || 'robot',
         })),
     };
   }
@@ -147,6 +168,7 @@ export class Room {
         id, ws: null, isBot: true,
         name: BOT_NAMES[i % BOT_NAMES.length],
         color: 0xff7a18, team: 0, ready: true,
+        character: CHARACTER_IDS[1 + ((Math.random() * (CHARACTER_IDS.length - 1)) | 0)],
         x: 0, y: 0.05, z: 0, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0,
         weapon: 'pulse', anim: 'Idle',
         health: 100, armor: 0, alive: true, frags: 0, deaths: 0, respawnAt: 0,
@@ -479,5 +501,6 @@ function pub(p) {
     health: p.health, armor: p.armor, alive: p.alive,
     frags: p.frags, deaths: p.deaths, carried: Math.floor(p.carried),
     moneyBanked: Math.floor(p.moneyBanked), moneyStolen: Math.floor(p.moneyStolen),
+    character: p.character || 'robot',
   };
 }

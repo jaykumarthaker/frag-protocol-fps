@@ -41,6 +41,8 @@ export class Actor {
   name: string;
   isBot = false;
   colorHex: number;
+  /** Which character model this actor wears. */
+  characterId: string = 'robot';
 
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;

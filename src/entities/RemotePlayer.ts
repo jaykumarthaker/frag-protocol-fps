@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Actor, ACTOR_FEET_OFFSET } from './Actor';
-import { createRobot, type RobotInstance, type RobotAnim } from '../core/Models';
+import { createCharacter, createHalo, type CharacterInstance, type CharacterAnim } from '../core/Models';
+import { makeNameTag } from './nameTag';
 import type { Game } from '../core/Game';
 import type { NetPlayer } from '../net/protocol';
 
@@ -17,34 +18,18 @@ interface Snap { t: number; x: number; y: number; z: number; yaw: number; }
 export class RemotePlayer extends Actor {
   netId: number;
   anim = 'Idle';
-  private robot: RobotInstance;
+  private robot: CharacterInstance;
   private buffer: Snap[] = [];
 
   constructor(game: Game, np: NetPlayer) {
     super(game, np.name, np.color, new THREE.Vector3(np.x, np.y, np.z));
     this.netId = np.id;
-    this.robot = createRobot(np.color);
+    this.characterId = np.character || 'robot';
+    this.robot = createCharacter(this.characterId, np.color);
     this.mesh.add(this.robot.root);
-    this.mesh.add(this.makeNameTag(np.name));
+    this.mesh.add(createHalo(np.color));
+    this.mesh.add(makeNameTag(np.name, np.color));
     this.applySnapshot(np);
-  }
-
-  private makeNameTag(name: string): THREE.Sprite {
-    const c = document.createElement('canvas');
-    c.width = 256; c.height = 64;
-    const ctx = c.getContext('2d')!;
-    ctx.font = 'bold 34px Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(8,12,20,0.7)';
-    ctx.fillRect(0, 8, 256, 48);
-    ctx.fillStyle = '#' + this.colorHex.toString(16).padStart(6, '0');
-    ctx.fillText(name.toUpperCase(), 128, 33);
-    const tex = new THREE.CanvasTexture(c);
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-    spr.position.y = 2.15;
-    spr.scale.set(2.4, 0.6, 1);
-    return spr;
   }
 
   /** Ingest an authoritative server snapshot of this player. */
@@ -103,7 +88,7 @@ export class RemotePlayer extends Actor {
   protected override updateVisual(dt: number) {
     this.robot.setWeapon(this.currentWeapon);
     this.robot.update(dt);
-    this.robot.play((this.anim as RobotAnim) || 'Idle');
+    this.robot.play((this.anim as CharacterAnim) || 'Idle');
   }
 }
 

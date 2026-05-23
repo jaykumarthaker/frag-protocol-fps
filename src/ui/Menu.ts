@@ -1,8 +1,13 @@
+import * as THREE from 'three';
 import type { Actor } from '../entities/Actor';
 import type { MatchConfig, GameMode, Team } from '../core/types';
 import type { CashRaidRules } from '../game/CashRaidRules';
 import type { LobbyConfig, LobbyState } from '../net/protocol';
 import { teamName } from '../game/teams';
+import {
+  CHARACTERS, loadCharacter, createCharacter, isCharacterAvailable,
+  type CharacterInstance,
+} from '../core/Models';
 
 /** Cash Raid economy defaults used for offline / instant-action matches. */
 export const CASHRAID_START_MONEY = 20000;
@@ -27,6 +32,10 @@ export interface MenuHandlers {
   onLobbyConfig: (config: LobbyConfig) => void;
   onLobbyKick: (id: number) => void;
   onLobbyStart: () => void;
+  /** Called when the player commits a character pick on the select screen. */
+  onCharacter: (id: string) => void;
+  /** Read the player's current character id (for hydrating the select UI). */
+  getCharacter: () => string;
   settings: GameSettings;
 }
 
@@ -112,6 +121,7 @@ export class Menu {
         <div class="btn-row">
           <button class="primary" id="m-start">Enter Arena</button>
           <button id="m-online">Play Online</button>
+          <button id="m-character">Character</button>
           <button id="m-credits">Credits</button>
         </div>
       </div>
@@ -196,7 +206,104 @@ export class Menu {
       this.h.onStart(cfg);
     };
     (s.querySelector('#m-online') as HTMLButtonElement).onclick = () => this.showOnlineHub();
+    (s.querySelector('#m-character') as HTMLButtonElement).onclick = () => this.showCharacterSelect();
     (s.querySelector('#m-credits') as HTMLButtonElement).onclick = () => this.showCredits();
+  }
+
+  // ---- character select ----------------------------------------------
+
+  /** Cleanup callback installed by the character-select preview. */
+  private characterSelectCleanup: (() => void) | null = null;
+
+  showCharacterSelect() {
+    this.disposeCharacterSelect();
+    this.clear();
+    const s = document.createElement('div');
+    s.className = 'screen';
+    const current = this.h.getCharacter();
+
+    const listHtml = CHARACTERS.map((c) => `
+      <button class="cs-item${c.id === current ? ' on' : ''}" data-cs="${c.id}">
+        <div class="cs-name">${c.name}</div>
+        <div class="cs-desc">${c.description}</div>
+      </button>
+    `).join('');
+
+    s.innerHTML = `
+      <div class="logo" style="font-size:46px;">CHOOSE <span class="x">YOUR FIGHTER</span></div>
+      <div class="tag">Free CC0 characters — swap any time from the main menu</div>
+      <div class="cs-wrap">
+        <div class="cs-list">${listHtml}</div>
+        <div class="cs-stage">
+          <canvas id="cs-canvas" width="420" height="520"></canvas>
+          <div class="cs-info">
+            <div class="cs-info-name" id="cs-info-name"></div>
+            <div class="cs-info-desc" id="cs-info-desc"></div>
+            <div class="cs-info-status" id="cs-info-status"></div>
+          </div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="cs-confirm">Confirm</button>
+        <button id="cs-back">Back</button>
+      </div>
+      <div class="help" style="margin-top:8px;">
+        Missing models? Drop GLB files into <b>public/models/characters/</b> —
+        see <b>public/models/characters/README.md</b>.
+      </div>
+    `;
+    this.container.appendChild(s);
+
+    const canvas = s.querySelector('#cs-canvas') as HTMLCanvasElement;
+    const infoName = s.querySelector('#cs-info-name') as HTMLElement;
+    const infoDesc = s.querySelector('#cs-info-desc') as HTMLElement;
+    const infoStatus = s.querySelector('#cs-info-status') as HTMLElement;
+    const preview = new CharacterPreview(canvas);
+    let selected = current;
+
+    const paintList = () => {
+      s.querySelectorAll('.cs-item').forEach((b) => {
+        b.classList.toggle('on', (b as HTMLElement).dataset.cs === selected);
+      });
+    };
+
+    const pick = async (id: string) => {
+      selected = id;
+      const def = CHARACTERS.find((c) => c.id === id)!;
+      infoName.textContent = def.name;
+      infoDesc.textContent = def.description;
+      infoStatus.textContent = 'loading…';
+      paintList();
+      await loadCharacter(id);
+      const ok = isCharacterAvailable(id);
+      infoStatus.textContent = ok ? '' :
+        'Model file not found — using the Sentinel as a stand-in. Drop the GLB into public/models/characters/ to enable.';
+      infoStatus.style.color = ok ? '' : '#ffb84d';
+      preview.show(id);
+    };
+
+    s.querySelectorAll('.cs-item').forEach((b) => {
+      b.addEventListener('click', () => pick((b as HTMLElement).dataset.cs!));
+    });
+    (s.querySelector('#cs-confirm') as HTMLButtonElement).onclick = () => {
+      this.h.onCharacter(selected);
+      this.disposeCharacterSelect();
+      this.showMain();
+    };
+    (s.querySelector('#cs-back') as HTMLButtonElement).onclick = () => {
+      this.disposeCharacterSelect();
+      this.showMain();
+    };
+
+    this.characterSelectCleanup = () => preview.dispose();
+    pick(current);
+  }
+
+  private disposeCharacterSelect() {
+    if (this.characterSelectCleanup) {
+      this.characterSelectCleanup();
+      this.characterSelectCleanup = null;
+    }
   }
 
   // ---- online ---------------------------------------------------------
@@ -616,5 +723,90 @@ export class Menu {
     this.container.appendChild(s);
     (s.querySelector('#e-again') as HTMLButtonElement).onclick = () => this.h.onRestart();
     (s.querySelector('#e-menu') as HTMLButtonElement).onclick = () => this.h.onMainMenu();
+  }
+}
+
+/**
+ * Mini Three.js scene for the character-select screen. Renders one cloned
+ * character on a small turntable inside a dedicated canvas. `show(id)` swaps
+ * the displayed character; `dispose()` tears everything down when the screen
+ * is closed.
+ */
+class CharacterPreview {
+  private renderer: THREE.WebGLRenderer;
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private mount = new THREE.Group();
+  private current: CharacterInstance | null = null;
+  private last = performance.now();
+  private alive = true;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(canvas.width, canvas.height, false);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    this.scene = new THREE.Scene();
+    this.scene.add(new THREE.HemisphereLight(0x8aa0ff, 0x1a1d26, 1.1));
+    const key = new THREE.DirectionalLight(0xfff2e0, 1.6);
+    key.position.set(3, 5, 4);
+    this.scene.add(key);
+    const rim = new THREE.PointLight(0x36e0ff, 30, 12);
+    rim.position.set(-2.5, 2.4, -2);
+    this.scene.add(rim);
+
+    // Pedestal disc with a soft glow rim — UT-ish stage feel.
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.2, 1.35, 0.1, 48),
+      new THREE.MeshStandardMaterial({ color: 0x0d1623, metalness: 0.6, roughness: 0.4 }),
+    );
+    disc.position.y = -0.05;
+    this.scene.add(disc);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.25, 0.04, 12, 48),
+      new THREE.MeshBasicMaterial({ color: 0x36e0ff }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.01;
+    this.scene.add(ring);
+
+    this.scene.add(this.mount);
+
+    this.camera = new THREE.PerspectiveCamera(35, canvas.width / canvas.height, 0.1, 50);
+    this.camera.position.set(0, 1.5, 3.6);
+    this.camera.lookAt(0, 0.95, 0);
+
+    this.loop();
+  }
+
+  async show(id: string) {
+    await loadCharacter(id);
+    if (!this.alive) return;
+    if (this.current) {
+      this.mount.remove(this.current.root);
+      this.current = null;
+    }
+    const inst = createCharacter(id, 0x36e0ff);
+    inst.setWeapon('pulse');
+    inst.play('Idle', 0);
+    this.mount.add(inst.root);
+    this.current = inst;
+  }
+
+  private loop = () => {
+    if (!this.alive) return;
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - this.last) / 1000);
+    this.last = now;
+    this.mount.rotation.y += dt * 0.7;
+    if (this.current) this.current.update(dt);
+    this.renderer.render(this.scene, this.camera);
+    requestAnimationFrame(this.loop);
+  };
+
+  dispose() {
+    this.alive = false;
+    this.renderer.dispose();
   }
 }
