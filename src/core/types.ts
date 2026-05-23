@@ -43,6 +43,8 @@ export interface MatchConfig {
   startMoney?: number;
   /** Cash Raid: bank total that triggers an instant win. */
   winTarget?: number;
+  /** Map id from the registry in `arena/MapRegistry.ts`. */
+  mapId?: string;
 }
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'matchover';

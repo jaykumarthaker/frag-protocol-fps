@@ -5,25 +5,29 @@ import type { DamageInfo, Team } from '../core/types';
 import { WEAPONS, WEAPON_ORDER } from '../weapons/Weapons';
 
 // --- movement tuning (arena-shooter feel: fast, floaty, twitchy) ---
-const GRAVITY = 55;
-const MAX_FALL = 62;
-const MAX_SPEED = 11;
-const GROUND_ACCEL = 10;
-const AIR_ACCEL = 2.6;
+// Bumped alongside the character scale-up so big maps don't feel like
+// jogging. Speeds rise ~18%, jumps a touch more so the taller capsule
+// still clears the same relative obstacle heights.
+const GRAVITY = 60;
+const MAX_FALL = 72;
+const MAX_SPEED = 13;
+const GROUND_ACCEL = 11;
+const AIR_ACCEL = 3.0;
 const FRICTION = 8;
-const JUMP_SPEED = 15.5;
-const DOUBLEJUMP_SPEED = 14;
-const DODGE_SPEED = 17;
-const DODGE_UP = 6.5;
+const JUMP_SPEED = 18;
+const DOUBLEJUMP_SPEED = 16;
+const DODGE_SPEED = 20;
+const DODGE_UP = 7.5;
 const DODGE_DURATION = 0.28;
 const DODGE_COOLDOWN = 0.35;
 
-export const ACTOR_RADIUS = 0.4;
-export const ACTOR_HALF_HEIGHT = 0.5; // capsule cylinder half-height
+// Capsule sized to roughly match the ~2.1 m rendered character.
+export const ACTOR_RADIUS = 0.47;
+export const ACTOR_HALF_HEIGHT = 0.59; // capsule cylinder half-height
 /** Distance from capsule centre down to the feet. */
 export const ACTOR_FEET_OFFSET = ACTOR_RADIUS + ACTOR_HALF_HEIGHT;
 /** Distance from capsule centre up to the eye / camera. */
-export const ACTOR_EYE_OFFSET = 0.62;
+export const ACTOR_EYE_OFFSET = 0.73;
 
 export interface HitSphere {
   center: THREE.Vector3;
@@ -176,9 +180,9 @@ export class Actor {
   hitSpheres(): HitSphere[] {
     const p = this.position;
     return [
-      { center: new THREE.Vector3(p.x, p.y + 0.6, p.z), radius: 0.34, head: true },
-      { center: new THREE.Vector3(p.x, p.y + 0.05, p.z), radius: 0.5, head: false },
-      { center: new THREE.Vector3(p.x, p.y - 0.58, p.z), radius: 0.44, head: false },
+      { center: new THREE.Vector3(p.x, p.y + 0.71, p.z), radius: 0.40, head: true },
+      { center: new THREE.Vector3(p.x, p.y + 0.06, p.z), radius: 0.59, head: false },
+      { center: new THREE.Vector3(p.x, p.y - 0.68, p.z), radius: 0.52, head: false },
     ];
   }
 

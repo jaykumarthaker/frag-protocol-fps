@@ -76,6 +76,7 @@ export class Room {
       fragLimit: c.fragLimit, winnerId: 0,
       bank1: c.startMoney, bank2: c.startMoney,
       winTarget: c.winTarget, winnerTeam: 0,
+      mapId: c.mapId || (c.mode === 'cashraid' ? 'cashraid' : 'atrium'),
     };
   }
 

@@ -44,6 +44,8 @@ export interface NetMatch {
   bank2: number;
   winTarget: number;
   winnerTeam: Team;
+  /** Map id from the registry in `arena/MapRegistry.ts`. */
+  mapId: string;
 }
 
 /** Host-configurable room settings. */
@@ -57,6 +59,8 @@ export interface LobbyConfig {
   startMoney: number;
   winTarget: number;
   isPublic: boolean;
+  /** Map id from the registry in `arena/MapRegistry.ts`. */
+  mapId: string;
 }
 
 /** One member of a pre-match lobby. */

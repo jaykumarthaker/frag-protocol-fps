@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Physics } from '../physics/Physics';
 import { Arena } from '../arena/Arena';
 import { CashRaidArena } from '../arena/CashRaidArena';
+import { MAPS, getMap } from '../arena/MapRegistry';
 import { Input } from './Input';
 import { Audio } from '../audio/Audio';
 import { Effects } from '../effects/Effects';
@@ -360,7 +361,7 @@ export class Game {
     this.clearMatch();
     this.lastConfig = config;
     this.gameMode = config.mode;
-    this.ensureArena(config.mode);
+    this.ensureArena(config.mode, config.mapId);
     this.firstBloodDone = false;
     this.time = 0;
 
@@ -462,15 +463,17 @@ export class Game {
     return this.arena instanceof CashRaidArena ? this.arena : null;
   }
 
-  /** Swap the live arena so it matches the requested game mode. */
-  private ensureArena(mode: GameMode) {
-    const wantCash = mode === 'cashraid';
-    if (wantCash === (this.arena instanceof CashRaidArena)) return;
-    this.arena.dispose();
-    this.arena = wantCash
-      ? new CashRaidArena(this.scene, this.physics)
-      : new Arena(this.scene, this.physics);
+  /** Id of the currently-built map, used to detect when a swap is needed. */
+  private currentMapId: string | null = null;
+
+  /** Swap the live arena to the requested map (lookup via the registry). */
+  private ensureArena(mode: GameMode, mapId?: string) {
+    const def = getMap(mapId, mode);
+    if (this.currentMapId === def.id) return;
+    if (this.arena) this.arena.dispose();
+    this.arena = def.factory(this.scene, this.physics);
     this.arena.build();
+    this.currentMapId = def.id;
   }
 
   private restart() {
@@ -585,6 +588,26 @@ export class Game {
     };
   }
 
+  /**
+   * True when at least one of the actor's hit spheres has a clear line from
+   * an explosion centre. Walls block splash; peeking around a corner (head
+   * exposed but torso not) still takes damage. A small margin lets blasts
+   * that detonate right against a wall still tag someone braced on the
+   * other side of a thin pillar.
+   */
+  private splashHasLineOfSight(center: THREE.Vector3, target: Actor): boolean {
+    for (const s of target.hitSpheres()) {
+      const to = s.center.clone().sub(center);
+      const dist = to.length();
+      if (dist < 1e-3) return true;
+      to.multiplyScalar(1 / dist);
+      const margin = Math.min(s.radius * 0.6, 0.3);
+      const hit = this.physics.raycastWorld(center, to, Math.max(0, dist - margin));
+      if (!hit) return true;
+    }
+    return false;
+  }
+
   spawnProjectile(opts: ProjectileOpts) {
     this.projectiles.push(new Projectile(this, opts));
   }
@@ -633,6 +656,10 @@ export class Game {
       if (this.gameMode === 'cashraid' && source && a !== source && sameTeam(source, a)) continue;
       const d = a.position.distanceTo(center);
       if (d > radius) continue;
+      // Solid geometry blocks splash: a rocket on the far side of a wall
+      // should not damage someone behind it. Self-damage (rocket jumps) is
+      // exempt because the blast originates at the shooter's feet.
+      if (a !== source && !this.splashHasLineOfSight(center, a)) continue;
       const falloff = 1 - d / radius;
       const kb = a.position.clone().sub(center);
       kb.y += radius * 0.35;
@@ -1013,7 +1040,7 @@ export class Game {
     this.localId = msg.youId;
     this.time = 0;
     this.firstBloodDone = false;
-    this.ensureArena(this.gameMode);
+    this.ensureArena(this.gameMode, msg.match.mapId);
 
     // Pre-load every character the match needs (local + remotes + bots).
     const needed = new Set<string>([this.characterId]);
@@ -1422,6 +1449,9 @@ export class Game {
           this.player && a.team === this.player.team) continue;
       const d = a.position.distanceTo(center);
       if (d > radius) continue;
+      // Self-damage (rocket jumps) still applies — the blast starts at the
+      // local player's feet so it has trivial LOS to them anyway.
+      if (a !== this.player && !this.splashHasLineOfSight(center, a)) continue;
       const falloff = 1 - d / radius;
       if (a instanceof RemotePlayer) {
         this.net?.send({
