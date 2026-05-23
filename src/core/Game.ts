@@ -704,7 +704,10 @@ export class Game {
       // should not damage someone behind it. Self-damage (rocket jumps) is
       // exempt because the blast originates at the shooter's feet.
       if (a !== source && !this.splashHasLineOfSight(center, a)) continue;
-      const falloff = 1 - d / radius;
+      // Eased falloff: full damage at the centre, ~75% at half-radius,
+      // tapering to 0 at the edge. Feels punchier than a pure linear curve
+      // for close-but-not-direct blasts (rocket cooked off near a target).
+      const falloff = Math.pow(1 - d / radius, 0.6);
       const kb = a.position.clone().sub(center);
       kb.y += radius * 0.35;
       if (kb.lengthSq() < 1e-4) kb.set(0, 1, 0);
@@ -1505,7 +1508,7 @@ export class Game {
       // Self-damage (rocket jumps) still applies — the blast starts at the
       // local player's feet so it has trivial LOS to them anyway.
       if (a !== this.player && !this.splashHasLineOfSight(center, a)) continue;
-      const falloff = 1 - d / radius;
+      const falloff = Math.pow(1 - d / radius, 0.6);
       if (a instanceof RemotePlayer) {
         this.net?.send({
           t: 'hit', targetId: a.netId,

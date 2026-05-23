@@ -105,7 +105,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
       splashRadius: 2.4,
       splashDamage: 28,
       knockback: 8,
-      bounces: 2,
+      bounces: 0,
       chargeTime: 0.9,
     },
   },

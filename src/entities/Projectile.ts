@@ -109,7 +109,7 @@ export class Projectile {
       for (const a of this.game.actors) {
         if (!a.alive || a === this.owner) continue;
         const d = distPointToSegment(a.position, prev, this.pos);
-        if (d < 0.55 + this.radius) {
+        if (d < 0.62 + this.radius) {
           const along = a.position.clone().sub(prev).dot(dir);
           if (along >= 0 && along < hitDist) { hitDist = along; hitActor = a; }
         }

@@ -21,13 +21,13 @@ const DODGE_UP = 7.5;
 const DODGE_DURATION = 0.28;
 const DODGE_COOLDOWN = 0.35;
 
-// Capsule sized to roughly match the ~2.1 m rendered character.
-export const ACTOR_RADIUS = 0.47;
-export const ACTOR_HALF_HEIGHT = 0.59; // capsule cylinder half-height
+// Capsule sized to roughly match the ~2.42 m rendered character.
+export const ACTOR_RADIUS = 0.54;
+export const ACTOR_HALF_HEIGHT = 0.67; // capsule cylinder half-height
 /** Distance from capsule centre down to the feet. */
 export const ACTOR_FEET_OFFSET = ACTOR_RADIUS + ACTOR_HALF_HEIGHT;
 /** Distance from capsule centre up to the eye / camera. */
-export const ACTOR_EYE_OFFSET = 0.73;
+export const ACTOR_EYE_OFFSET = 0.85;
 
 export interface HitSphere {
   center: THREE.Vector3;
@@ -180,9 +180,9 @@ export class Actor {
   hitSpheres(): HitSphere[] {
     const p = this.position;
     return [
-      { center: new THREE.Vector3(p.x, p.y + 0.71, p.z), radius: 0.40, head: true },
-      { center: new THREE.Vector3(p.x, p.y + 0.06, p.z), radius: 0.59, head: false },
-      { center: new THREE.Vector3(p.x, p.y - 0.68, p.z), radius: 0.52, head: false },
+      { center: new THREE.Vector3(p.x, p.y + 0.82, p.z), radius: 0.46, head: true },
+      { center: new THREE.Vector3(p.x, p.y + 0.07, p.z), radius: 0.74, head: false },
+      { center: new THREE.Vector3(p.x, p.y - 0.78, p.z), radius: 0.66, head: false },
     ];
   }
 
