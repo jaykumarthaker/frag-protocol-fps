@@ -21,6 +21,7 @@ import { SHOP_ITEMS, type ShopItem } from '../game/shop';
 import { VaultZone } from '../entities/VaultZone';
 import { BuyStation } from '../entities/BuyStation';
 import { CashDrop } from '../entities/CashDrop';
+import { WeaponDrop } from '../entities/WeaponDrop';
 import { HUD } from '../ui/HUD';
 import { Menu, type GameSettings } from '../ui/Menu';
 import { BuyMenu } from '../ui/BuyMenu';
@@ -52,6 +53,20 @@ function saveStoredCharacter(id: string) {
   try { localStorage.setItem(CHARACTER_LS_KEY, id); } catch { /* ignore */ }
 }
 
+/** Persist the player's quality preference. Default is `fast` so the game
+ *  is smooth out-of-the-box; players opt-in to bloom + bigger shadows. */
+const QUALITY_LS_KEY = 'fp.quality';
+function loadStoredQuality(): GameSettings['quality'] {
+  try {
+    const v = localStorage.getItem(QUALITY_LS_KEY);
+    if (v === 'high' || v === 'fast') return v;
+  } catch { /* ignore */ }
+  return 'fast';
+}
+function saveStoredQuality(q: GameSettings['quality']) {
+  try { localStorage.setItem(QUALITY_LS_KEY, q); } catch { /* ignore */ }
+}
+
 /** Deterministic per-bot character pick (skipping the default robot) seeded
  *  by the bot's index, so the same lineup looks the same each round. */
 function botCharacter(seed: number): string {
@@ -76,7 +91,9 @@ const DEATH_DROP_FRACTION = 0.70;
  */
 export class Game {
   renderer!: THREE.WebGLRenderer;
-  composer!: EffectComposer;
+  /** Post-FX pipeline (bloom + output). Undefined on the `fast` quality
+   *  tier, in which case the loop renders straight through. */
+  composer?: EffectComposer;
   scene!: THREE.Scene;
   camera!: THREE.PerspectiveCamera;
 
@@ -101,6 +118,7 @@ export class Game {
   vaults: VaultZone[] = [];
   buyStations: BuyStation[] = [];
   cashDrops: CashDrop[] = [];
+  weaponDrops: WeaponDrop[] = [];
   buyMenu!: BuyMenu;
 
   // online play
@@ -113,7 +131,10 @@ export class Game {
   /** Active rule set for the current match. */
   gameMode: GameMode = 'deathmatch';
   time = 0;
-  settings: GameSettings = { sensitivity: 1.0, volume: 0.7, fov: 95 };
+  settings: GameSettings = {
+    sensitivity: 1.0, volume: 0.7, fov: 95,
+    quality: loadStoredQuality(),
+  };
   /** The character the local player picked on the character-select screen. */
   characterId: string = loadStoredCharacter();
 
@@ -134,11 +155,14 @@ export class Game {
     const g = new Game();
     g.parent = parent;
 
-    g.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    g.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const fast = g.settings.quality === 'fast';
+    g.renderer = new THREE.WebGLRenderer({
+      antialias: !fast, powerPreference: 'high-performance',
+    });
+    g.renderer.setPixelRatio(Math.min(window.devicePixelRatio, fast ? 1.25 : 2));
     g.renderer.setSize(window.innerWidth, window.innerHeight);
     g.renderer.shadowMap.enabled = true;
-    g.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    g.renderer.shadowMap.type = fast ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     g.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     g.renderer.toneMappingExposure = 1.0;
     parent.appendChild(g.renderer.domElement);
@@ -181,6 +205,7 @@ export class Game {
       onLobbyStart: () => g.lobbyStart(),
       onCharacter: (id) => g.setCharacter(id),
       getCharacter: () => g.characterId,
+      onQuality: (q) => { g.settings.quality = q; saveStoredQuality(q); },
     });
 
     g.input.onPointerUnlock = () => { if (g.state === 'playing') g.pause(); };
@@ -206,20 +231,30 @@ export class Game {
     fill.position.set(-28, 30, -24);
     this.scene.add(fill);
 
+    const fast = this.settings.quality === 'fast';
     const dir = new THREE.DirectionalLight(0xfff2e0, 1.85);
     dir.position.set(34, 54, 22);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(2048, 2048);
+    // Smaller shadow map + tighter frustum on fast — the shadow framebuffer
+    // is the single biggest per-frame cost on mid-range GPUs.
+    const shadowSize = fast ? 1024 : 2048;
+    dir.shadow.mapSize.set(shadowSize, shadowSize);
     const c = dir.shadow.camera;
-    c.left = -42; c.right = 42; c.top = 42; c.bottom = -42;
-    c.near = 1; c.far = 140;
+    const shadowExtent = fast ? 55 : 90;
+    c.left = -shadowExtent; c.right = shadowExtent;
+    c.top  = shadowExtent;  c.bottom = -shadowExtent;
+    c.near = 1; c.far = fast ? 160 : 220;
     dir.shadow.bias = -0.0009;
     this.scene.add(dir);
     this.scene.add(dir.target);
 
-    const glow = new THREE.PointLight(0x36e0ff, 16, 70);
-    glow.position.set(0, 15, 0);
-    this.scene.add(glow);
+    // Skip the centre glow point light on fast — it adds a draw cost without
+    // changing the silhouette read of the level.
+    if (!fast) {
+      const glow = new THREE.PointLight(0x36e0ff, 16, 70);
+      glow.position.set(0, 15, 0);
+      this.scene.add(glow);
+    }
   }
 
   /** A gradient sky dome behind the arena. */
@@ -255,8 +290,10 @@ export class Game {
     this.scene.add(sky);
   }
 
-  /** Bloom post-processing pipeline (makes emissive trims / FX glow). */
+  /** Bloom post-processing pipeline (makes emissive trims / FX glow).
+   *  Skipped entirely on 'fast' quality — see `render()` below. */
   private setupComposer() {
+    if (this.settings.quality === 'fast') return;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.composer.addPass(new UnrealBloomPass(
@@ -284,7 +321,8 @@ export class Game {
     }
 
     this.audio.setMasterVolume(this.settings.volume);
-    this.composer.render();
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
     requestAnimationFrame(this.loop);
   };
@@ -317,6 +355,10 @@ export class Game {
       if (this.projectiles[i].dead) this.projectiles.splice(i, 1);
     }
     for (const p of this.pickups) p.update(dt);
+    for (let i = this.weaponDrops.length - 1; i >= 0; i--) {
+      this.weaponDrops[i].update(dt);
+      if (this.weaponDrops[i].dead) this.weaponDrops.splice(i, 1);
+    }
     this.effects.update(dt);
     this.updateRespawns();
     if (this.gameMode === 'cashraid') this.updateCashRaid(dt);
@@ -446,6 +488,7 @@ export class Game {
     for (const v of this.vaults) v.dispose();
     for (const b of this.buyStations) b.dispose();
     for (const d of this.cashDrops) d.dispose();
+    for (const d of this.weaponDrops) d.dispose();
     this.actors = [];
     this.bots = [];
     this.projectiles = [];
@@ -453,6 +496,7 @@ export class Game {
     this.vaults = [];
     this.buyStations = [];
     this.cashDrops = [];
+    this.weaponDrops = [];
     this.cashRules = null;
     this.buyMenu.close();
     this.player = null;
@@ -681,6 +725,15 @@ export class Game {
   onActorDied(victim: Actor, killer: Actor | null, weaponId: string, headshot: boolean) {
     this.effects.explosion(victim.position.clone(), 2.4, victim.colorHex);
     this.audio.play('die', victim.position);
+
+    // Drop the victim's carried weapon for others to grab. Skip the basic
+    // pulse rifle (everyone has one) and only in offline matches — online
+    // play would need server-authoritative drop tracking.
+    if (this.mode === 'offline' && victim.currentWeapon && victim.currentWeapon !== 'pulse') {
+      const at = victim.position.clone();
+      at.y -= ACTOR_FEET_OFFSET - 0.2;
+      this.weaponDrops.push(new WeaponDrop(this, victim.currentWeapon, at));
+    }
 
     // Cash Raid: a dead carrier drops most of their money on the ground.
     if (this.gameMode === 'cashraid' && victim.carried > 0) {
@@ -1473,6 +1526,6 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.composer?.setSize(window.innerWidth, window.innerHeight);
   }
 }
