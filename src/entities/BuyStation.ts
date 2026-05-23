@@ -21,27 +21,39 @@ export class BuyStation {
     this.center = def.center.clone();
     this.radius = def.radius;
 
-    // a glowing cube hologram hovering over the podium
+    // a glowing icosahedron hologram hovering inside the kiosk frame
     this.holo = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.7, 0),
+      new THREE.IcosahedronGeometry(1.1, 0),
       new THREE.MeshStandardMaterial({
         color: 0xffd23f, emissive: 0xffd23f, emissiveIntensity: 2.2,
         transparent: true, opacity: 0.9,
       }),
     );
-    this.holo.position.set(this.center.x, 2.0, this.center.z);
+    this.holo.position.set(this.center.x, 3.2, this.center.z);
     this.group.add(this.holo);
 
+    // glowing team-coloured ring on the floor that reads as the buy zone
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(this.radius * 0.85, 0.08, 8, 32),
+      new THREE.TorusGeometry(this.radius * 0.9, 0.14, 8, 36),
       new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.6 }),
     );
-    ring.position.set(this.center.x, 0.6, this.center.z);
+    ring.position.set(this.center.x, 0.06, this.center.z);
     ring.rotation.x = Math.PI / 2;
     this.group.add(ring);
 
-    const light = new THREE.PointLight(0xffd23f, 5, 11);
-    light.position.set(this.center.x, 2.2, this.center.z);
+    // soft inner disk so the buy zone reads even at a distance
+    const disk = new THREE.Mesh(
+      new THREE.CircleGeometry(this.radius * 0.85, 32),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.18, side: THREE.DoubleSide,
+      }),
+    );
+    disk.position.set(this.center.x, 0.04, this.center.z);
+    disk.rotation.x = -Math.PI / 2;
+    this.group.add(disk);
+
+    const light = new THREE.PointLight(0xffd23f, 8, 16);
+    light.position.set(this.center.x, 3.5, this.center.z);
     this.group.add(light);
 
     scene.add(this.group);
@@ -58,7 +70,7 @@ export class BuyStation {
     this.spin += dt;
     this.holo.rotation.y = this.spin * 1.3;
     this.holo.rotation.x = this.spin * 0.7;
-    this.holo.position.y = 2.0 + Math.sin(this.spin * 1.8) * 0.2;
+    this.holo.position.y = 3.2 + Math.sin(this.spin * 1.8) * 0.25;
   }
 
   dispose() {
