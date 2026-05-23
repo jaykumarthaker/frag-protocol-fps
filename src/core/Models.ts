@@ -42,7 +42,7 @@ export interface CharacterInstance {
 // Larger-than-life arena-shooter scale. Bigger maps mean players read better
 // at size, and headshots are slightly easier to land at long range — both
 // match the UT-genre target feel.
-const TARGET_HEIGHT = 2.1;
+const TARGET_HEIGHT = 2.42;
 
 /**
  * Character roster. Order is the order shown in the character-select screen.
