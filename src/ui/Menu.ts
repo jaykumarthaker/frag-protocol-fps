@@ -849,9 +849,11 @@ class CharacterPreview {
 
     this.scene.add(this.mount);
 
+    // Framed for the current ~3.3 m character height — pulled back and raised
+    // so head-to-toe fits with a little headroom on the pedestal.
     this.camera = new THREE.PerspectiveCamera(35, canvas.width / canvas.height, 0.1, 50);
-    this.camera.position.set(0, 1.5, 3.6);
-    this.camera.lookAt(0, 0.95, 0);
+    this.camera.position.set(0, 2.1, 5.6);
+    this.camera.lookAt(0, 1.55, 0);
 
     this.loop();
   }

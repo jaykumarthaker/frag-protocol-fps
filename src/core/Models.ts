@@ -44,6 +44,11 @@ export interface CharacterInstance {
 // match the UT-genre target feel. The current roster is rendered extra-big
 // so the characters read clearly across the larger Cash Raid map.
 const TARGET_HEIGHT = 3.3;
+/** Reference height the weapon meshes are designed for. When characters are
+ *  bigger than this we scale the held weapon up to match so it doesn't look
+ *  like a toy in their hand. */
+const WEAPON_REFERENCE_HEIGHT = 2.42;
+const WEAPON_SCALE = TARGET_HEIGHT / WEAPON_REFERENCE_HEIGHT;
 
 /**
  * Character roster. Order is the order shown in the character-select screen.
@@ -172,24 +177,30 @@ function findClip(clips: THREE.AnimationClip[], anim: CharacterAnim): THREE.Anim
 
 /** Find the right-hand bone for parenting a held weapon. Different packs name
  *  it differently — Mixamo/Three.js use `Hand.R`/`RightHand`, Quaternius uses
- *  `Fist.R`, so we look for either keyword plus a right-side suffix. */
+ *  `Fist.R`, and some packs (the current George/Leela/Mike/Stan roster) have
+ *  no single hand bone at all — only `PalmI.R` / `PalmP.R` etc. finger-root
+ *  bones — so we also accept those, plus a `LowerArm.R` last-resort. */
 function findRightHand(root: THREE.Object3D): THREE.Object3D | null {
   const isBone = (o: THREE.Object3D) => (o as THREE.Bone).isBone;
   const rightSide = /(right|_r\b|\br$|\.r$|rhand)/;
-  let hand: THREE.Object3D | null = null;
-  root.traverse((o) => {
-    if (hand || !isBone(o)) return;
-    const n = o.name.toLowerCase();
-    if ((n.includes('hand') || n.includes('fist')) && rightSide.test(n)) hand = o;
-  });
-  if (!hand) {
+
+  const findRight = (test: (lower: string) => boolean): THREE.Object3D | null => {
+    let hit: THREE.Object3D | null = null;
     root.traverse((o) => {
-      if (hand || !isBone(o)) return;
+      if (hit || !isBone(o)) return;
       const n = o.name.toLowerCase();
-      if (n.includes('hand') || n.includes('fist')) hand = o;
+      if (rightSide.test(n) && test(n)) hit = o;
     });
-  }
-  return hand;
+    return hit;
+  };
+
+  return (
+    findRight((n) => n.includes('hand') || n.includes('fist')) ??
+    // PalmI = index-finger metacarpal = closest natural grip point.
+    findRight((n) => n.startsWith('palmi') || n.includes('palmi.')) ??
+    findRight((n) => n.includes('palm')) ??
+    findRight((n) => n.includes('lowerarm') || n.includes('forearm'))
+  );
 }
 
 /** Create an independent animated character. Team / player colour is shown
@@ -219,7 +230,10 @@ export function createCharacter(
 
   const weaponAnchor = new THREE.Group();
   weaponAnchor.rotation.y = Math.PI;
-  weaponAnchor.scale.setScalar(1 / lc.fitScale);
+  // The anchor lives under the (scaled) character root, so we undo the fit
+  // scale to bring weapons back to world units, then scale them up so they
+  // stay in proportion with the larger character silhouette.
+  weaponAnchor.scale.setScalar(WEAPON_SCALE / lc.fitScale);
   if (!handBone) weaponAnchor.position.set(0.3 / lc.fitScale, 1.18 / lc.fitScale, 0.12 / lc.fitScale);
   root.add(weaponAnchor);
 
