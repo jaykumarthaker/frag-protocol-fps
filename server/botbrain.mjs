@@ -2,31 +2,35 @@
  * Lightweight server-side bot AI for Cash Raid + deathmatch. No physics: bots
  * navigate the waypoint graph at a fixed speed and fire at nearby enemies
  * (the room applies the damage authoritatively).
+ *
+ * Pathfinding helpers take the room's map (`room.map`) as a parameter so
+ * different rooms can run different Cash Raid layouts in the same server.
  */
-import { WAYPOINTS, LINKS } from './cashraid-map.mjs';
 
 const BOT_SPEED = 8.5;
 const SIGHT = 32;
 const FIRE_CD = { rookie: 0.95, skilled: 0.6, deadly: 0.4 };
 const FIRE_DMG = { rookie: 11, skilled: 17, deadly: 24 };
 
-/** Index of the waypoint nearest (x,z). */
-export function nearestWp(x, z) {
+/** Index of the waypoint in `map` nearest (x,z). */
+export function nearestWp(map, x, z) {
+  const WPS = map.WAYPOINTS;
   let best = -1, bd = Infinity;
-  for (let i = 0; i < WAYPOINTS.length; i++) {
-    const w = WAYPOINTS[i];
+  for (let i = 0; i < WPS.length; i++) {
+    const w = WPS[i];
     const d = (w[0] - x) ** 2 + (w[2] - z) ** 2;
     if (d < bd) { bd = d; best = i; }
   }
   return best;
 }
 
-/** A* over the server waypoint graph; returns a list of waypoint indices. */
-export function findPath(start, goal) {
+/** A* over the map's waypoint graph; returns a list of waypoint indices. */
+export function findPath(map, start, goal) {
   if (start < 0 || goal < 0) return [];
   if (start === goal) return [start];
+  const WPS = map.WAYPOINTS, LNS = map.LINKS;
   const dist = (a, b) => {
-    const A = WAYPOINTS[a], B = WAYPOINTS[b];
+    const A = WPS[a], B = WPS[b];
     return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]);
   };
   const open = new Set([start]);
@@ -42,7 +46,7 @@ export function findPath(start, goal) {
       return p.reverse();
     }
     open.delete(cur);
-    for (const nx of LINKS[cur]) {
+    for (const nx of LNS[cur]) {
       const t = (g.get(cur) ?? Infinity) + dist(cur, nx);
       if (t < (g.get(nx) ?? Infinity)) {
         came.set(nx, cur); g.set(nx, t); f.set(nx, t + dist(nx, goal)); open.add(nx);
@@ -96,8 +100,9 @@ export function tickBot(bot, room, dt) {
 
   // navigate toward the objective along the waypoint graph
   if (ai.path.length === 0 || ai.pi >= ai.path.length || now >= ai.repathAt) {
-    const idx = findPath(nearestWp(bot.x, bot.z), nearestWp(objX, objZ));
-    ai.path = idx.map((i) => WAYPOINTS[i]);
+    const map = room.map;
+    const idx = findPath(map, nearestWp(map, bot.x, bot.z), nearestWp(map, objX, objZ));
+    ai.path = idx.map((i) => map.WAYPOINTS[i]);
     ai.path.push([objX, 0, objZ]);
     ai.pi = 0;
     ai.repathAt = now + 3.5;

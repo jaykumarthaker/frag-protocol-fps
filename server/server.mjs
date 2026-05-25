@@ -38,7 +38,7 @@ function sanitiseConfig(raw) {
   const diff = ['rookie', 'skilled', 'deadly'].includes(r.difficulty) ? r.difficulty : 'skilled';
   // Map allowlist — must stay in sync with src/arena/MapRegistry.ts.
   const dmMaps = ['atrium', 'duel'];
-  const crMaps = ['cashraid'];
+  const crMaps = ['cashraid', 'vaultyard'];
   const validMaps = mode === 'cashraid' ? crMaps : dmMaps;
   const mapId = validMaps.includes(r.mapId) ? r.mapId
     : (mode === 'cashraid' ? 'cashraid' : 'atrium');

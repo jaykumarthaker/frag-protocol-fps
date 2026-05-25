@@ -4,7 +4,7 @@
  * all Cash Raid money (carried, banks, drops, deposits, purchases) are owned
  * here; clients only report transforms and request actions.
  */
-import { VAULTS, BUY_STATIONS, TEAM_SPAWNS, vaultAt, buyStationAt } from './cashraid-map.mjs';
+import { getMap } from './cashraid-map.mjs';
 import { tickBot, makeBotState } from './botbrain.mjs';
 
 const RESPAWN_SEC = 2.5;
@@ -50,6 +50,9 @@ export class Room {
     this.hostId = 0;
     this.players = new Map();
     this.clock = 0;
+    // Resolve the Cash Raid map for this room (only used in cashraid mode;
+    // for deathmatch the room uses DM_SPAWNS and doesn't path through bots).
+    this.map = getMap(config.mapId);
     this.match = this.freshMatch();
     this.cashDrops = [];
     this.nextDropId = 1;
@@ -200,7 +203,7 @@ export class Room {
   /** Pick a spawn for a player and reset their vitals. */
   spawn(p, atStart = false) {
     let pts = DM_SPAWNS;
-    if (this.cash && p.team !== 0) pts = TEAM_SPAWNS[p.team];
+    if (this.cash && p.team !== 0) pts = this.map.TEAM_SPAWNS[p.team];
     // furthest from live enemies
     let best = pts[0], bestScore = -1;
     for (const sp of pts) {
@@ -238,8 +241,8 @@ export class Room {
     }
   }
 
-  ownVault(team) { return VAULTS.find((v) => v.team === team); }
-  enemyVault(team) { return VAULTS.find((v) => v.team !== team); }
+  ownVault(team) { return this.map.VAULTS.find((v) => v.team === team); }
+  enemyVault(team) { return this.map.VAULTS.find((v) => v.team !== team); }
 
   // ---- per-message handlers ------------------------------------------
 
@@ -320,7 +323,7 @@ export class Room {
     if (this.phase !== 'playing' || !this.cash || p.team === 0 || !p.alive) return;
     const item = SHOP[msg.itemId];
     if (!item) return;
-    const bs = buyStationAt(p.x, p.z);
+    const bs = this.map.buyStationAt(p.x, p.z);
     if (!bs || bs.team !== p.team) return;
     if (item.kind === 'weapon' && item.weaponId && p.loadout.has(item.weaponId)) return;
     const bankKey = p.team === 1 ? 'bank1' : 'bank2';
@@ -378,7 +381,7 @@ export class Room {
   updateChannels() {
     for (const p of this.players.values()) {
       if (!p.alive) { p.depositChannel = 0; continue; }
-      const v = vaultAt(p.x, p.y, p.z);
+      const v = this.map.vaultAt(p.x, p.y, p.z);
       const mine = v && v.team === p.team;
       const valid = v && ((mine && p.carried > 0) || (!mine && v));
       if (p.interact && valid) {

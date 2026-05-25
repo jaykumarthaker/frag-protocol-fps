@@ -4,6 +4,7 @@ import type { GameMode } from '../core/types';
 import { Arena } from './Arena';
 import { AtriumArena } from './AtriumArena';
 import { CashRaidArena } from './CashRaidArena';
+import { VaultYardArena } from './VaultYardArena';
 
 /**
  * Map registry. Each entry describes one playable arena and how to construct
@@ -24,8 +25,9 @@ export const MAPS: readonly MapDef[] = [
     id: 'atrium',
     name: 'The Atrium',
     description:
-      'Three-tier industrial arena. Bridges overlook a sunken pit; ' +
-      'jump pads launch from the corners. Big sightlines, vertical fights.',
+      'A sky citadel suspended over the void. Two team-coloured tower ' +
+      'bases flank a central spire; jump pads launch onto floating decks. ' +
+      'Step off the edge and you fall forever.',
     modes: ['deathmatch'],
     factory: (s, p) => new AtriumArena(s, p),
   },
@@ -45,6 +47,15 @@ export const MAPS: readonly MapDef[] = [
       'Two opposing bases with vaults and buy stations across a contested midfield.',
     modes: ['cashraid'],
     factory: (s, p) => new CashRaidArena(s, p),
+  },
+  {
+    id: 'vaultyard',
+    name: 'Vault Yard',
+    description:
+      'Compact close-quarters Cash Raid map. Vaults sit against the back ' +
+      'wall, mid is a low cover ring — short steal cycles, brawl pace.',
+    modes: ['cashraid'],
+    factory: (s, p) => new VaultYardArena(s, p),
   },
 ];
 
