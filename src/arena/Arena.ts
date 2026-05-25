@@ -135,6 +135,9 @@ export class Arena {
   // -------------------------------------------------------------------
 
   protected makeMaterials() {
+    // All surface textures are procedural 256x256 canvases generated once at
+    // arena load and shared across every box that uses them — same memory
+    // footprint as the old grid textures, just less video-game-y looking.
     const grid = (base: string, line: string, accent: string) => {
       const c = document.createElement('canvas');
       c.width = c.height = 256;
@@ -157,14 +160,92 @@ export class Arena {
       return tex;
     };
 
-    const floorTex = grid('#10161f', '#1c2735', '#243447');
-    floorTex.repeat.set(16, 16);
-    this.matFloor = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95, metalness: 0.05 });
+    // Mottled concrete-ish texture: a base fill, a cheap two-octave value
+    // noise, a sprinkle of brighter/darker speckles, and faint panel seams.
+    // Reads as a real surface up close without paying for an actual PBR pack.
+    const concrete = (
+      base: [number, number, number],
+      noise: number,
+      speckLight: string,
+      speckDark: string,
+      seamColor: string | null,
+    ) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 256;
+      const g = c.getContext('2d')!;
+      const img = g.createImageData(256, 256);
+      const d = img.data;
+      // Deterministic hash-noise so each load looks identical.
+      const n = (x: number, y: number) => {
+        const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        return s - Math.floor(s);
+      };
+      const smooth = (x: number, y: number) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        const xf = x - xi, yf = y - yi;
+        const a = n(xi, yi), b = n(xi + 1, yi);
+        const cc = n(xi, yi + 1), dd = n(xi + 1, yi + 1);
+        const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+        return a + (b - a) * u + (cc + (dd - cc) * u - a - (b - a) * u) * v;
+      };
+      for (let y = 0; y < 256; y++) {
+        for (let x = 0; x < 256; x++) {
+          const v = smooth(x / 18, y / 18) * 0.65 + smooth(x / 5, y / 5) * 0.35;
+          const k = (v - 0.5) * 2 * noise;
+          const i = (y * 256 + x) * 4;
+          d[i]     = Math.max(0, Math.min(255, base[0] + k * 255));
+          d[i + 1] = Math.max(0, Math.min(255, base[1] + k * 255));
+          d[i + 2] = Math.max(0, Math.min(255, base[2] + k * 255));
+          d[i + 3] = 255;
+        }
+      }
+      g.putImageData(img, 0, 0);
+      // Speckles — tiny dots so the surface reads as gritty, not painted.
+      const speck = (color: string, count: number, size: number) => {
+        g.fillStyle = color;
+        for (let i = 0; i < count; i++) {
+          const x = (Math.sin(i * 91.7) * 43758.5453) % 1;
+          const y = (Math.sin(i * 53.3 + 17) * 43758.5453) % 1;
+          g.fillRect(Math.abs(x) * 256, Math.abs(y) * 256, size, size);
+        }
+      };
+      speck(speckLight, 220, 1);
+      speck(speckDark, 140, 1);
+      if (seamColor) {
+        g.strokeStyle = seamColor;
+        g.lineWidth = 1;
+        g.globalAlpha = 0.45;
+        for (const i of [0, 128]) {
+          g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 256); g.stroke();
+          g.beginPath(); g.moveTo(0, i); g.lineTo(256, i); g.stroke();
+        }
+        g.globalAlpha = 1;
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.anisotropy = 4;
+      return tex;
+    };
 
-    const wallTex = grid('#0c1119', '#161f2b', '#2a3a4d');
-    wallTex.repeat.set(10, 3);
-    this.matWall = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9, metalness: 0.1 });
+    // Floor: warm mid-grey concrete — bright enough that dark character
+    // silhouettes pop against it, dirty enough not to look like a gallery.
+    const floorTex = concrete([95, 92, 86], 0.18, '#b4ada0', '#3d3a35', '#2c2825');
+    floorTex.repeat.set(10, 10);
+    this.matFloor = new THREE.MeshStandardMaterial({
+      map: floorTex, roughness: 0.95, metalness: 0.04,
+    });
 
+    // Walls: cooler dark panel — keeps the atmospheric feel but with real
+    // surface detail instead of glowy grid lines.
+    const wallTex = concrete([46, 52, 62], 0.14, '#8a93a3', '#1a1f28', '#2d3540');
+    wallTex.repeat.set(8, 3);
+    this.matWall = new THREE.MeshStandardMaterial({
+      map: wallTex, roughness: 0.85, metalness: 0.12,
+    });
+
+    // Structures (platforms / ramps) keep the old grid look so they read as
+    // engineered objects against the natural floor/walls.
     const structTex = grid('#141b27', '#22303f', '#36e0ff');
     structTex.repeat.set(3, 3);
     this.matStruct = new THREE.MeshStandardMaterial({ map: structTex, roughness: 0.8, metalness: 0.15 });
