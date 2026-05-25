@@ -25,17 +25,7 @@ const BOT_NAMES = ['VEX', 'RAZE', 'NOVA', 'KILO', 'ZERO', 'ORYX', 'BANE', 'ECHO'
  *  with the CHARACTERS registry in src/core/Models.ts. */
 export const CHARACTER_IDS = [
   'robot',
-  'soldier_m', 'soldier_f', 'bluesoldier_m', 'bluesoldier_f',
-  'knight_m', 'knight_gold_m', 'knight_gold_f',
-  'ninja_m', 'ninja_f', 'ninja_sand',
-  'pirate_m', 'pirate_f',
-  'viking_m', 'viking_f',
-  'goblin_m', 'goblin_f',
-  'cowboy_m', 'cowboy_f',
-  'wizard', 'witch', 'elf',
-  'zombie_m', 'zombie_f',
-  'kimono_m', 'kimono_f',
-  'suit_m', 'suit_f',
+  'george', 'leela', 'mike', 'stan',
 ];
 export function sanitiseCharacter(id) {
   return CHARACTER_IDS.includes(id) ? id : 'robot';

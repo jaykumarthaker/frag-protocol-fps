@@ -41,8 +41,14 @@ export interface CharacterInstance {
 
 // Larger-than-life arena-shooter scale. Bigger maps mean players read better
 // at size, and headshots are slightly easier to land at long range — both
-// match the UT-genre target feel.
-const TARGET_HEIGHT = 2.42;
+// match the UT-genre target feel. The current roster is rendered extra-big
+// so the characters read clearly across the larger Cash Raid map.
+const TARGET_HEIGHT = 3.3;
+/** Reference height the weapon meshes are designed for. When characters are
+ *  bigger than this we scale the held weapon up to match so it doesn't look
+ *  like a toy in their hand. */
+const WEAPON_REFERENCE_HEIGHT = 2.42;
+const WEAPON_SCALE = TARGET_HEIGHT / WEAPON_REFERENCE_HEIGHT;
 
 /**
  * Character roster. Order is the order shown in the character-select screen.
@@ -58,166 +64,28 @@ export const CHARACTERS: readonly CharacterDef[] = [
     file: 'models/RobotExpressive.glb',
   },
   {
-    id: 'soldier_m',
-    name: 'Soldier',
-    description: 'Veteran trooper. Hard-edged and unflinching.',
-    file: 'models/characters/Soldier_Male.gltf',
+    id: 'george',
+    name: 'George',
+    description: 'Steady aim, steadier nerves.',
+    file: 'models/characters/George.gltf',
   },
   {
-    id: 'soldier_f',
-    name: 'Sergeant',
-    description: 'Combat-tested operator. All edge, no slack.',
-    file: 'models/characters/Soldier_Female.gltf',
+    id: 'leela',
+    name: 'Leela',
+    description: 'Quick on the draw, quicker on the kill.',
+    file: 'models/characters/Leela.gltf',
   },
   {
-    id: 'bluesoldier_m',
-    name: 'Blue Lance',
-    description: 'Elite blue-team trooper. Disciplined and deadly.',
-    file: 'models/characters/BlueSoldier_Male.gltf',
+    id: 'mike',
+    name: 'Mike',
+    description: 'Heavy hitter with no off switch.',
+    file: 'models/characters/Mike.gltf',
   },
   {
-    id: 'bluesoldier_f',
-    name: 'Blue Reaver',
-    description: 'Blue-team striker. Fast, lethal, precise.',
-    file: 'models/characters/BlueSoldier_Female.gltf',
-  },
-  {
-    id: 'knight_m',
-    name: 'Iron Knight',
-    description: 'Heavy plate, heavier presence.',
-    file: 'models/characters/Knight_Male.gltf',
-  },
-  {
-    id: 'knight_gold_m',
-    name: 'Gilded Knight',
-    description: 'Royal champion in golden plate.',
-    file: 'models/characters/Knight_Golden_Male.gltf',
-  },
-  {
-    id: 'knight_gold_f',
-    name: 'Golden Valkyrie',
-    description: 'Knighted in gold, sharpened by war.',
-    file: 'models/characters/Knight_Golden_Female.gltf',
-  },
-  {
-    id: 'ninja_m',
-    name: 'Shadow',
-    description: 'Silent, fast, unforgiving.',
-    file: 'models/characters/Ninja_Male.gltf',
-  },
-  {
-    id: 'ninja_f',
-    name: 'Kunoichi',
-    description: 'Whispers move faster than her blade.',
-    file: 'models/characters/Ninja_Female.gltf',
-  },
-  {
-    id: 'ninja_sand',
-    name: 'Sand Wraith',
-    description: 'Desert-born assassin. Vanishes in dust.',
-    file: 'models/characters/Ninja_Sand.gltf',
-  },
-  {
-    id: 'pirate_m',
-    name: 'Corsair',
-    description: 'Loud, brutal, allergic to rules.',
-    file: 'models/characters/Pirate_Male.gltf',
-  },
-  {
-    id: 'pirate_f',
-    name: 'Reaver',
-    description: 'Takes ships. Takes lives. Takes names.',
-    file: 'models/characters/Pirate_Female.gltf',
-  },
-  {
-    id: 'viking_m',
-    name: 'Berserker',
-    description: 'North-blood and battle-fury.',
-    file: 'models/characters/Viking_Male.gltf',
-  },
-  {
-    id: 'viking_f',
-    name: 'Shieldmaiden',
-    description: 'Sword, shield, and a song for the slain.',
-    file: 'models/characters/Viking_Female.gltf',
-  },
-  {
-    id: 'goblin_m',
-    name: 'Goblin',
-    description: 'Small, mean, and surprisingly armed.',
-    file: 'models/characters/Goblin_Male.gltf',
-  },
-  {
-    id: 'goblin_f',
-    name: 'Hexgoblin',
-    description: 'Sneaky, vicious, allergic to fair fights.',
-    file: 'models/characters/Goblin_Female.gltf',
-  },
-  {
-    id: 'cowboy_m',
-    name: 'Gunslinger',
-    description: 'Frontier draw. Faster than fair.',
-    file: 'models/characters/Cowboy_Male.gltf',
-  },
-  {
-    id: 'cowboy_f',
-    name: 'Outlaw',
-    description: 'Wanted in three counties and counting.',
-    file: 'models/characters/Cowboy_Female.gltf',
-  },
-  {
-    id: 'wizard',
-    name: 'Archmage',
-    description: 'Old-world tactician with new-world weapons.',
-    file: 'models/characters/Wizard.gltf',
-  },
-  {
-    id: 'witch',
-    name: 'Coven',
-    description: 'Spell-warped and combat-keen.',
-    file: 'models/characters/Witch.gltf',
-  },
-  {
-    id: 'elf',
-    name: 'Silvanus',
-    description: 'Forest-blooded, arena-honed.',
-    file: 'models/characters/Elf.gltf',
-  },
-  {
-    id: 'zombie_m',
-    name: 'Revenant',
-    description: 'Death didn\'t take. Now it brings the fight.',
-    file: 'models/characters/Zombie_Male.gltf',
-  },
-  {
-    id: 'zombie_f',
-    name: 'Ghoul',
-    description: 'Hungry. Patient. Hard to put down.',
-    file: 'models/characters/Zombie_Female.gltf',
-  },
-  {
-    id: 'kimono_m',
-    name: 'Samurai',
-    description: 'Discipline in silk. Death in steel.',
-    file: 'models/characters/Kimono_Male.gltf',
-  },
-  {
-    id: 'kimono_f',
-    name: 'Geisha-ko',
-    description: 'Grace masking a killer\'s edge.',
-    file: 'models/characters/Kimono_Female.gltf',
-  },
-  {
-    id: 'suit_m',
-    name: 'The Agent',
-    description: 'Tailored, deniable, dangerous.',
-    file: 'models/characters/Suit_Male.gltf',
-  },
-  {
-    id: 'suit_f',
-    name: 'Operative',
-    description: 'Sharp suit. Sharper instincts.',
-    file: 'models/characters/Suit_Female.gltf',
+    id: 'stan',
+    name: 'Stan',
+    description: 'Cold operator. Colder shot.',
+    file: 'models/characters/Stan.gltf',
   },
 ];
 
@@ -309,24 +177,30 @@ function findClip(clips: THREE.AnimationClip[], anim: CharacterAnim): THREE.Anim
 
 /** Find the right-hand bone for parenting a held weapon. Different packs name
  *  it differently — Mixamo/Three.js use `Hand.R`/`RightHand`, Quaternius uses
- *  `Fist.R`, so we look for either keyword plus a right-side suffix. */
+ *  `Fist.R`, and some packs (the current George/Leela/Mike/Stan roster) have
+ *  no single hand bone at all — only `PalmI.R` / `PalmP.R` etc. finger-root
+ *  bones — so we also accept those, plus a `LowerArm.R` last-resort. */
 function findRightHand(root: THREE.Object3D): THREE.Object3D | null {
   const isBone = (o: THREE.Object3D) => (o as THREE.Bone).isBone;
   const rightSide = /(right|_r\b|\br$|\.r$|rhand)/;
-  let hand: THREE.Object3D | null = null;
-  root.traverse((o) => {
-    if (hand || !isBone(o)) return;
-    const n = o.name.toLowerCase();
-    if ((n.includes('hand') || n.includes('fist')) && rightSide.test(n)) hand = o;
-  });
-  if (!hand) {
+
+  const findRight = (test: (lower: string) => boolean): THREE.Object3D | null => {
+    let hit: THREE.Object3D | null = null;
     root.traverse((o) => {
-      if (hand || !isBone(o)) return;
+      if (hit || !isBone(o)) return;
       const n = o.name.toLowerCase();
-      if (n.includes('hand') || n.includes('fist')) hand = o;
+      if (rightSide.test(n) && test(n)) hit = o;
     });
-  }
-  return hand;
+    return hit;
+  };
+
+  return (
+    findRight((n) => n.includes('hand') || n.includes('fist')) ??
+    // PalmI = index-finger metacarpal = closest natural grip point.
+    findRight((n) => n.startsWith('palmi') || n.includes('palmi.')) ??
+    findRight((n) => n.includes('palm')) ??
+    findRight((n) => n.includes('lowerarm') || n.includes('forearm'))
+  );
 }
 
 /** Create an independent animated character. Team / player colour is shown
@@ -356,7 +230,10 @@ export function createCharacter(
 
   const weaponAnchor = new THREE.Group();
   weaponAnchor.rotation.y = Math.PI;
-  weaponAnchor.scale.setScalar(1 / lc.fitScale);
+  // The anchor lives under the (scaled) character root, so we undo the fit
+  // scale to bring weapons back to world units, then scale them up so they
+  // stay in proportion with the larger character silhouette.
+  weaponAnchor.scale.setScalar(WEAPON_SCALE / lc.fitScale);
   if (!handBone) weaponAnchor.position.set(0.3 / lc.fitScale, 1.18 / lc.fitScale, 0.12 / lc.fitScale);
   root.add(weaponAnchor);
 

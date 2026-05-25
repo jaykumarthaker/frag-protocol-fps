@@ -1,12 +1,13 @@
 # Character models
 
-This folder ships with the **Quaternius Modular Characters** pack (CC0 / public
-domain) — https://quaternius.com/packs/modularcharacters.html. ~50 stylized
-humanoids share one rig and one animation set, so they all plug into the
-character-select screen with no per-model code.
+This folder ships a four-character roster — **George**, **Leela**, **Mike** and
+**Stan** — alongside the bundled `RobotExpressive` fallback. Each is a rigged
+humanoid `.gltf` with the standard `Idle` / `Running` / `Jump` / `Death`
+animation clips, so they plug into the character-select screen with no
+per-model code.
 
-The registry in [`src/core/Models.ts`](../../../src/core/Models.ts) curates a
-subset (~28 characters) for the in-game roster. To add or remove characters
+The registry in [`src/core/Models.ts`](../../../src/core/Models.ts) curates
+the in-game roster. To add or remove characters
 from the **Choose Your Fighter** screen:
 
 1. Add a `CharacterDef` entry to `CHARACTERS` in `src/core/Models.ts` pointing

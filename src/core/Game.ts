@@ -168,8 +168,8 @@ export class Game {
     parent.appendChild(g.renderer.domElement);
 
     g.scene = new THREE.Scene();
-    g.scene.background = new THREE.Color(0x0a0e16);
-    g.scene.fog = new THREE.Fog(0x0a0e16, 45, 150);
+    g.scene.background = new THREE.Color(0x05070d);
+    g.scene.fog = new THREE.Fog(0x080b16, 55, 180);
 
     g.camera = new THREE.PerspectiveCamera(g.settings.fov, window.innerWidth / window.innerHeight, 0.05, 400);
     g.scene.add(g.camera);
@@ -257,7 +257,9 @@ export class Game {
     }
   }
 
-  /** A gradient sky dome behind the arena. */
+  /** Deep-space skybox: vertical gradient + procedural stars + soft nebula
+   *  clouds, all computed in the fragment shader. One sphere mesh, no
+   *  textures — same draw cost as the old flat gradient. */
   private setupEnvironment() {
     const sky = new THREE.Mesh(
       new THREE.SphereGeometry(280, 32, 16),
@@ -265,9 +267,11 @@ export class Game {
         side: THREE.BackSide,
         fog: false,
         uniforms: {
-          top: { value: new THREE.Color(0x070d18) },
-          bottom: { value: new THREE.Color(0x030406) },
-          horizon: { value: new THREE.Color(0x101c30) },
+          top: { value: new THREE.Color(0x05060f) },      // zenith — near-black indigo
+          bottom: { value: new THREE.Color(0x020306) },   // nadir
+          horizon: { value: new THREE.Color(0x111a36) },  // distant atmosphere band
+          nebulaA: { value: new THREE.Color(0x4a2870) },  // violet nebula
+          nebulaB: { value: new THREE.Color(0x1e6fa8) },  // cyan nebula
         },
         vertexShader: `
           varying vec3 vPos;
@@ -277,13 +281,71 @@ export class Game {
           }`,
         fragmentShader: `
           uniform vec3 top; uniform vec3 bottom; uniform vec3 horizon;
+          uniform vec3 nebulaA; uniform vec3 nebulaB;
           varying vec3 vPos;
+
+          float hash21(vec2 p) {
+            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+          }
+          float vnoise(vec2 p) {
+            vec2 i = floor(p), f = fract(p);
+            float a = hash21(i), b = hash21(i + vec2(1.0, 0.0));
+            float c = hash21(i + vec2(0.0, 1.0)), d = hash21(i + vec2(1.0, 1.0));
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+          }
+          float fbm(vec2 p) {
+            float v = 0.0, a = 0.5;
+            for (int i = 0; i < 5; i++) { v += a * vnoise(p); p *= 2.03; a *= 0.5; }
+            return v;
+          }
+          // Star field: hash each cell, only the rarest hashes light up; size
+          // grows with how-rare to give a believable brightness distribution.
+          float starLayer(vec2 uv, float density, float size) {
+            vec2 g = floor(uv);
+            vec2 f = fract(uv) - 0.5;
+            float h = hash21(g);
+            float pick = step(1.0 - density, h);
+            float bright = (h - (1.0 - density)) / max(density, 1e-4);
+            float r = length(f);
+            float core = smoothstep(size * (0.6 + 0.8 * bright), 0.0, r);
+            return pick * core * (0.35 + 0.65 * bright);
+          }
           void main() {
-            float h = normalize(vPos).y;
-            vec3 col = h > 0.0
-              ? mix(horizon, top, pow(h, 0.5))
-              : mix(horizon, bottom, pow(-h, 0.5));
-            gl_FragColor = vec4(col, 1.0);
+            vec3 d = normalize(vPos);
+            float h = d.y;
+            // Vertical gradient: black above, faint band at horizon, deep below.
+            vec3 sky = h > 0.0
+              ? mix(horizon, top, pow(h, 0.55))
+              : mix(horizon, bottom, pow(-h, 0.55));
+
+            // Project the upper hemisphere to a stable 2D coord for the
+            // star / nebula sampling. Skip below-horizon entirely so the
+            // floor area stays clean and unbusy.
+            vec3 dom = d;
+            if (dom.y < 0.02) dom.y = 0.02;
+            vec2 uv = dom.xz / (dom.y + 0.35);
+
+            // Nebula: two-octave FBM blob, threshold-shaped so it forms
+            // patchy clouds rather than a uniform haze.
+            float n = fbm(uv * 1.6);
+            float n2 = fbm(uv * 4.2 + 9.3);
+            float cloud = smoothstep(0.45, 0.95, n * 0.7 + n2 * 0.45);
+            vec3 nebula = mix(nebulaA, nebulaB, smoothstep(0.3, 0.9, n2));
+            sky += nebula * cloud * 0.55 * smoothstep(0.0, 0.25, h);
+
+            // Three star layers at different densities/sizes for parallax-y
+            // depth. All sampled at high frequencies.
+            float s = 0.0;
+            s += starLayer(uv * 120.0, 0.012, 0.42);
+            s += starLayer(uv * 60.0,  0.005, 0.55) * 1.4;
+            s += starLayer(uv * 30.0,  0.002, 0.65) * 1.8;
+            // Mostly-white stars with a faint cool/warm tint per cell.
+            vec3 starTint = mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.92, 0.78),
+                                hash21(floor(uv * 60.0) + 17.0));
+            sky += s * starTint * smoothstep(-0.05, 0.2, h);
+
+            gl_FragColor = vec4(sky, 1.0);
           }`,
       }),
     );
