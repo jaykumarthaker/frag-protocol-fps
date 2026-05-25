@@ -30,7 +30,11 @@
       "Bash(curl -s -o nul -w \"%{http_code}\" http://localhost:5173/)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
       "Bash(jobs -p)",
-      "Bash(xargs -r kill)"
+      "Bash(xargs -r kill)",
+      "Bash(node --check d:/temp/frag-protocol-fps/server/cashraid-map.mjs)",
+      "Bash(node --check d:/temp/frag-protocol-fps/server/room.mjs)",
+      "Bash(node --check d:/temp/frag-protocol-fps/server/botbrain.mjs)",
+      "Bash(node --check d:/temp/frag-protocol-fps/server/server.mjs)"
     ]
   }
 }
