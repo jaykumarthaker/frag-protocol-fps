@@ -88,6 +88,68 @@ button.primary {
   transform: translate(-50%, -50%);
 }
 
+/* PUBG-style railgun scope: a circular lens cut into a fullscreen black
+   mask, with a thin metal bezel, crosshair, and mil-dot ticks. */
+#hud.scoped #crosshair { display: none; }
+#scope {
+  position: absolute; inset: 0; pointer-events: none;
+  --lens: min(78vh, 78vw);
+}
+#scope.hidden { display: none; }
+#scope .lens {
+  position: absolute; left: 50%; top: 50%;
+  width: var(--lens); height: var(--lens);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  /* huge spread casts black across the rest of the screen, leaving a
+     clear circular cutout in the centre */
+  box-shadow: 0 0 0 9999px #000;
+}
+#scope .bezel {
+  position: absolute; left: 50%; top: 50%;
+  width: var(--lens); height: var(--lens);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  /* layered inset rings: dark bezel + brushed-metal highlight + thin liner */
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.08),
+    inset 0 0 0 10px #0a0a0a,
+    inset 0 0 0 14px #1c1c1c,
+    inset 0 0 32px 6px rgba(0, 0, 0, 0.9);
+}
+/* crosshair lines — span the full lens, hairline width */
+#scope .vline, #scope .hline {
+  position: absolute; left: 50%; top: 50%; background: #000;
+  transform: translate(-50%, -50%);
+}
+#scope .vline { width: 2px; height: var(--lens); }
+#scope .hline { width: var(--lens); height: 2px; }
+/* mil-dot ticks marching out from the centre along each axis */
+#scope .tick {
+  position: absolute; left: 50%; top: 50%; width: 4px; height: 4px;
+  background: #000; border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+#scope .tick.t1 { margin-top: calc(var(--lens) * -0.12); }
+#scope .tick.t2 { margin-top: calc(var(--lens) * -0.22); }
+#scope .tick.t3 { margin-top: calc(var(--lens) * -0.32); }
+#scope .tick.b1 { margin-top: calc(var(--lens) *  0.12); }
+#scope .tick.b2 { margin-top: calc(var(--lens) *  0.22); }
+#scope .tick.b3 { margin-top: calc(var(--lens) *  0.32); }
+#scope .tick.l1 { margin-left: calc(var(--lens) * -0.12); }
+#scope .tick.l2 { margin-left: calc(var(--lens) * -0.22); }
+#scope .tick.l3 { margin-left: calc(var(--lens) * -0.32); }
+#scope .tick.r1 { margin-left: calc(var(--lens) *  0.12); }
+#scope .tick.r2 { margin-left: calc(var(--lens) *  0.22); }
+#scope .tick.r3 { margin-left: calc(var(--lens) *  0.32); }
+#scope .centerdot {
+  position: absolute; left: 50%; top: 50%;
+  width: 5px; height: 5px;
+  background: #e8252a; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 6px rgba(232, 37, 42, 0.9);
+}
+
 /* hitmarker */
 #hitmarker {
   position: absolute; left: 50%; top: 50%;

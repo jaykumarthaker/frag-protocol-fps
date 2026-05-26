@@ -49,8 +49,19 @@ export interface WeaponDef {
   maxAmmo: number;
   /** Ammo granted by an ammo pickup. */
   pickupAmmo: number;
-  /** Theme colour for beams / projectiles / viewmodel. */
+  /** Theme colour for beams / projectiles / viewmodel body. */
   color: number;
+  /** Secondary theme colour — accent trim, sights, projectile cores. */
+  accent: number;
+  /** Respawn (seconds) for this weapon's ground ammo pickup. */
+  ammoRespawn: number;
+  /** Optional ADS / scope settings (currently railgun only). */
+  ads?: {
+    /** Camera FOV while aiming (lower = more zoom). */
+    fov: number;
+    /** Mouse sensitivity multiplier while aiming. */
+    sensMul: number;
+  };
   primary: FireSpec;
   secondary?: FireSpec;
 }
@@ -60,18 +71,21 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'railgun',
     name: 'RAILGUN',
     slot: 1,
-    startAmmo: 15,
-    maxAmmo: 35,
-    pickupAmmo: 12,
+    startAmmo: 4,
+    maxAmmo: 12,
+    pickupAmmo: 2,
     color: 0x36e0ff,
+    accent: 0xffffff,
+    ammoRespawn: 40,
+    ads: { fov: 32, sensMul: 0.38 },
     primary: {
       kind: 'hitscan',
-      damage: 80,
+      damage: 115,
       cooldown: 1.15,
       ammoCost: 1,
       spread: 0,
-      range: 320,
-      headshotMul: 2.0,
+      range: 360,
+      headshotMul: 2.5,
       chargeTime: 0.14,
     },
   },
@@ -83,6 +97,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
     maxAmmo: 70,
     pickupAmmo: 24,
     color: 0xffd23f,
+    accent: 0x2dff6a,
+    ammoRespawn: 15,
     primary: {
       kind: 'pellets',
       damage: 11,
@@ -117,6 +133,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
     maxAmmo: 32,
     pickupAmmo: 10,
     color: 0xff7a18,
+    accent: 0xff2a4d,
+    ammoRespawn: 15,
     primary: {
       kind: 'projectile',
       damage: 32,
@@ -141,6 +159,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
     maxAmmo: 130,
     pickupAmmo: 50,
     color: 0xb98bff,
+    accent: 0xff5fb0,
+    ammoRespawn: 15,
     primary: {
       kind: 'hitscan',
       damage: 9,

@@ -109,8 +109,19 @@ export class Arena {
     for (const [x, z] of [[22, 22], [-22, 22], [22, -22], [-22, -22]] as [number, number][]) {
       this.pickupSpawns.push({ type: 'health', pos: new THREE.Vector3(x, 1.2, z) });
     }
-    for (const [x, z] of [[14, 0], [-14, 0], [0, -22], [11, 11], [-11, -11]] as [number, number][]) {
-      this.pickupSpawns.push({ type: 'ammo', pos: new THREE.Vector3(x, 1.2, z) });
+    // Each weapon's ammo has its own colour + icon. Railgun ammo is rare;
+    // the others sprinkle across the floor in roughly equal numbers.
+    const ammoSpots: [PickupType, number, number][] = [
+      ['ammo_rocket',   14,   0],
+      ['ammo_pulse',   -14,   0],
+      ['ammo_shard',     0, -22],
+      ['ammo_pulse',    11,  11],
+      ['ammo_shard',   -11, -11],
+      ['ammo_railgun',   0, PT + 2], // single railgun slug on the central spire
+    ];
+    for (const [type, x, z] of ammoSpots) {
+      const y = type === 'ammo_railgun' ? PT + 1.0 : 1.2;
+      this.pickupSpawns.push({ type, pos: new THREE.Vector3(x, y, z) });
     }
 
     // Step once so the query pipeline sees the static geometry before the

@@ -34,6 +34,17 @@ export class HUD {
     this.root.id = 'hud';
     this.root.innerHTML = `
       <div id="crosshair"><span class="h left"></span><span class="h right"></span><span class="dot"></span></div>
+      <div id="scope" class="hidden">
+        <div class="lens"></div>
+        <div class="bezel"></div>
+        <div class="vline"></div>
+        <div class="hline"></div>
+        <div class="tick t1"></div><div class="tick t2"></div><div class="tick t3"></div>
+        <div class="tick b1"></div><div class="tick b2"></div><div class="tick b3"></div>
+        <div class="tick l1"></div><div class="tick l2"></div><div class="tick l3"></div>
+        <div class="tick r1"></div><div class="tick r2"></div><div class="tick r3"></div>
+        <div class="centerdot"></div>
+      </div>
       <div id="hitmarker"><span class="a"></span><span class="b"></span><span class="c"></span><span class="d"></span></div>
       <div id="damage-flash"></div>
       <div id="matchstate">
@@ -103,11 +114,18 @@ export class HUD {
     this.root.classList.toggle('hidden', !v);
   }
 
+  /** PUBG-style scope overlay — circular lens + crosshair mask. */
+  setScoped(on: boolean) {
+    this.root.classList.toggle('scoped', on);
+    this.q('#scope').classList.toggle('hidden', !on);
+  }
+
   /** Per-frame refresh of vitals, ammo, weapons, timer and score. */
   update(
     player: Player, match: MatchRules, actors: Actor[], time: number,
     cashRules?: CashRaidRules | null,
   ) {
+    this.setScoped(player.ads);
     this.healthNum.textContent = String(Math.ceil(player.health));
     this.healthNum.classList.toggle('low', player.health <= 30);
     this.armorNum.textContent = String(Math.ceil(player.armor));
