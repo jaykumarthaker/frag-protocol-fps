@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import type { Game } from '../core/Game';
 import type { Actor } from './Actor';
+import { WEAPONS } from '../weapons/Weapons';
 
-export type PickupType = 'health' | 'health_mega' | 'armor' | 'ammo' | 'amp';
+export type PickupType =
+  | 'health' | 'health_mega' | 'armor' | 'amp'
+  | 'ammo_railgun' | 'ammo_shard' | 'ammo_rocket' | 'ammo_pulse';
 
 interface PickupSpec {
   respawn: number;
@@ -12,12 +15,26 @@ interface PickupSpec {
 }
 
 const SPECS: Record<PickupType, PickupSpec> = {
-  health:      { respawn: 20, color: 0x6dff8a, glow: false, label: '+25 HEALTH' },
-  health_mega: { respawn: 35, color: 0x2dff6a, glow: true,  label: 'MEGA HEALTH' },
-  armor:       { respawn: 25, color: 0x36e0ff, glow: false, label: '+75 ARMOR' },
-  ammo:        { respawn: 15, color: 0xff7a18, glow: false, label: 'AMMO' },
-  amp:         { respawn: 30, color: 0xb98bff, glow: true,  label: 'DAMAGE AMP' },
+  health:       { respawn: 20, color: 0x6dff8a, glow: false, label: '+25 HEALTH' },
+  health_mega:  { respawn: 35, color: 0x2dff6a, glow: true,  label: 'MEGA HEALTH' },
+  armor:        { respawn: 25, color: 0x36e0ff, glow: false, label: '+75 ARMOR' },
+  amp:          { respawn: 30, color: 0xb98bff, glow: true,  label: 'DAMAGE AMP' },
+  ammo_railgun: { respawn: WEAPONS.railgun.ammoRespawn, color: WEAPONS.railgun.color, glow: true,  label: 'RAILGUN SLUG' },
+  ammo_shard:   { respawn: WEAPONS.shard.ammoRespawn,   color: WEAPONS.shard.color,   glow: false, label: 'SHARD MAG' },
+  ammo_rocket:  { respawn: WEAPONS.rocket.ammoRespawn,  color: WEAPONS.rocket.color,  glow: false, label: 'ROCKETS' },
+  ammo_pulse:   { respawn: WEAPONS.pulse.ammoRespawn,   color: WEAPONS.pulse.color,   glow: false, label: 'PULSE CELL' },
 };
+
+/** Map an ammo PickupType to the weapon id it refills. */
+function ammoWeapon(type: PickupType): string | null {
+  switch (type) {
+    case 'ammo_railgun': return 'railgun';
+    case 'ammo_shard':   return 'shard';
+    case 'ammo_rocket':  return 'rocket';
+    case 'ammo_pulse':   return 'pulse';
+    default: return null;
+  }
+}
 
 /** A floating, respawning arena pickup (health / armour / ammo / power-up). */
 export class Pickup {
@@ -111,8 +128,14 @@ export class Pickup {
       case 'health':      return a.health < a.maxHealth;
       case 'health_mega': return a.health < 150;
       case 'armor':       return a.armor < a.maxArmor;
-      case 'ammo':        return true;
       case 'amp':         return !a.ampActive();
+      default: {
+        const wid = ammoWeapon(this.type);
+        if (!wid) return false;
+        // Only collect this weapon's ammo if the actor owns the weapon and isn't capped.
+        if (!a.inventory.has(wid)) return false;
+        return (a.ammo[wid] ?? 0) < WEAPONS[wid].maxAmmo;
+      }
     }
   }
 
@@ -121,8 +144,11 @@ export class Pickup {
       case 'health':      a.health = Math.min(a.maxHealth, a.health + 25); break;
       case 'health_mega': a.health = Math.min(150, a.health + 50); break;
       case 'armor':       a.armor = Math.min(a.maxArmor, a.armor + 75); break;
-      case 'ammo':        a.giveAmmoAll(); break;
       case 'amp':         a.ampUntil = this.game.time + 25; break;
+      default: {
+        const wid = ammoWeapon(this.type);
+        if (wid) a.giveAmmo(wid, WEAPONS[wid].pickupAmmo);
+      }
     }
   }
 
@@ -154,10 +180,13 @@ function buildIcon(type: PickupType, mat: THREE.Material): THREE.Object3D {
     case 'health':      return crossIcon(0.55, 0.18, mat);
     case 'health_mega': return crossIcon(0.85, 0.28, mat, true);
     case 'armor':       return shieldIcon(mat);
-    case 'ammo':        return cartridgeIcon(mat);
     case 'amp':         return new THREE.Mesh(
       new THREE.TorusKnotGeometry(0.3, 0.12, 64, 8), mat,
     );
+    case 'ammo_railgun': return railSlugIcon(mat);
+    case 'ammo_shard':   return shardClusterIcon(mat);
+    case 'ammo_rocket':  return rocketAmmoIcon(mat);
+    case 'ammo_pulse':   return pulseCellIcon(mat);
   }
 }
 
@@ -205,18 +234,72 @@ function shieldIcon(mat: THREE.Material): THREE.Group {
   return g;
 }
 
-/** Two stubby bullet cartridges side-by-side — bullet body + cone tip. */
-function cartridgeIcon(mat: THREE.Material): THREE.Group {
+/** Railgun ammo — a tall, narrow energy slug (matches the cyan accelerator). */
+function railSlugIcon(mat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
-  const make = (x: number) => {
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.4, 12), mat);
-    body.position.set(x, -0.08, 0);
-    g.add(body);
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 12), mat);
-    tip.position.set(x, 0.23, 0);
-    g.add(tip);
-  };
-  make(-0.13);
-  make(0.13);
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.62, 14), mat));
+  g.add(new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.18, 14), mat)).position.y = 0.4;
+  // ring collars so it reads as the railgun's barrel coils miniaturised
+  for (const y of [-0.18, 0, 0.18]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.025, 6, 16), mat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = y;
+    g.add(ring);
+  }
+  return g;
+}
+
+/** Shard Cannon ammo — a faceted crystal cluster like the gun's magazine. */
+function shardClusterIcon(mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 0), mat));
+  const a = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), mat);
+  a.position.set(0.22, 0.08, 0);
+  a.rotation.set(0.4, 0.3, 0.2);
+  g.add(a);
+  const b = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0), mat);
+  b.position.set(-0.2, -0.1, 0.05);
+  b.rotation.set(-0.3, 0.6, -0.2);
+  g.add(b);
+  return g;
+}
+
+/** Rocket Launcher ammo — a single mini warhead (cone + body + fins). */
+function rocketAmmoIcon(mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.46, 14), mat);
+  body.position.y = -0.05;
+  g.add(body);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.24, 14), mat);
+  tip.position.y = 0.3;
+  g.add(tip);
+  // tail fins
+  for (let i = 0; i < 4; i++) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.18), mat);
+    fin.position.y = -0.26;
+    fin.rotation.y = (i * Math.PI) / 2;
+    fin.position.x = Math.cos(fin.rotation.y) * 0.12;
+    fin.position.z = Math.sin(fin.rotation.y) * 0.12;
+    g.add(fin);
+  }
+  return g;
+}
+
+/** Pulse Rifle ammo — a glowing plasma cell (sphere in a cradle). */
+function pulseCellIcon(mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.28, 18, 14), mat));
+  // cradle bands
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.035, 8, 24), mat);
+  ring.rotation.x = Math.PI / 2;
+  g.add(ring);
+  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.035, 8, 24), mat);
+  g.add(ring2);
+  // caps
+  for (const y of [-0.34, 0.34]) {
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.08, 12), mat);
+    cap.position.y = y;
+    g.add(cap);
+  }
   return g;
 }

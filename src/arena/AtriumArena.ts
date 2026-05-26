@@ -310,14 +310,24 @@ export class AtriumArena extends Arena {
       this.pickupSpawns.push({ type: 'health', pos: new THREE.Vector3(x, 1.2, z) });
     }
     // Ammo: bridge ends + sky platforms + island corners
-    for (const [x, z] of [
-      [0, -ISLAND_HALF - 4], [0,  ISLAND_HALF + 4],
-      [ ISLAND_HALF + 4, 0], [-ISLAND_HALF - 4, 0],
-      [ SKY_R, 0], [-SKY_R, 0],
-    ] as [number, number][]) {
+    // Per-weapon ammo — railgun slug perched on the high spire (riskiest grab).
+    const ammoSpots: [import('../entities/Pickup').PickupType, number, number][] = [
+      ['ammo_rocket', 0, -ISLAND_HALF - 4],
+      ['ammo_shard',  0,  ISLAND_HALF + 4],
+      ['ammo_pulse',  ISLAND_HALF + 4, 0],
+      ['ammo_pulse', -ISLAND_HALF - 4, 0],
+      ['ammo_shard',  SKY_R, 0],
+      ['ammo_rocket', -SKY_R, 0],
+    ];
+    for (const [type, x, z] of ammoSpots) {
       const y = (Math.abs(x) === SKY_R) ? SKY_Y + 1.2 : 1.2;
-      this.pickupSpawns.push({ type: 'ammo', pos: new THREE.Vector3(x, y, z) });
+      this.pickupSpawns.push({ type, pos: new THREE.Vector3(x, y, z) });
     }
+    // Single railgun ammo near the spire base — contested, high-value.
+    this.pickupSpawns.push({
+      type: 'ammo_railgun',
+      pos: new THREE.Vector3(0, SKY_Y + 1.2, SKY_R),
+    });
 
     // A few extra spawn points up on the sky platforms so respawns can
     // sometimes drop in from high ground.

@@ -6,6 +6,7 @@ import type { MatchConfig } from '../core/types';
 import { lookDir } from '../core/look';
 import { findPath, nearestWaypoint } from './nav';
 import { WEAPONS } from '../weapons/Weapons';
+import { sameTeam } from '../game/teams';
 
 export interface BotIntent {
   wishDir: THREE.Vector3;
@@ -133,6 +134,9 @@ export class BotBrain {
     let bestD = Infinity;
     for (const a of this.game.actors) {
       if (a === this.bot || !a.alive) continue;
+      // Never target teammates. sameTeam returns false when team is 0,
+      // so deathmatch (no teams) is unaffected.
+      if (sameTeam(this.bot, a)) continue;
       const d = this.bot.position.distanceTo(a.position);
       if (d < bestD && this.canSee(a)) { bestD = d; best = a; }
     }

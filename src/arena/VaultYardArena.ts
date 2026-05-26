@@ -146,8 +146,16 @@ export class VaultYardArena extends CashRaidArena {
     for (const [x, z] of [[18, 6], [-18, -6], [18, -6], [-18, 6]] as [number, number][]) {
       this.pickupSpawns.push({ type: 'health', pos: new THREE.Vector3(x, 1.2, z) });
     }
-    for (const [x, z] of [[0, 18], [0, -18], [22, 0], [-22, 0]] as [number, number][]) {
-      this.pickupSpawns.push({ type: 'ammo', pos: new THREE.Vector3(x, 1.2, z) });
+    // Per-weapon ammo: matched colour/icon per gun, railgun ammo is the rarest.
+    const ammoSpots: [import('../entities/Pickup').PickupType, number, number][] = [
+      ['ammo_rocket',  0,  18],
+      ['ammo_pulse',   0, -18],
+      ['ammo_shard',  22,   0],
+      ['ammo_shard', -22,   0],
+      ['ammo_railgun', 14, 14],
+    ];
+    for (const [type, x, z] of ammoSpots) {
+      this.pickupSpawns.push({ type, pos: new THREE.Vector3(x, 1.2, z) });
     }
     this.pickupSpawns.push({ type: 'armor', pos: new THREE.Vector3( 26, 1.2,  0) });
     this.pickupSpawns.push({ type: 'armor', pos: new THREE.Vector3(-26, 1.2,  0) });
