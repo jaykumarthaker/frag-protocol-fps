@@ -196,8 +196,17 @@ export class CashRaidArena extends Arena {
     for (const [x, z] of [[20, 10], [-20, -10], [32, -16], [-32, 16]] as [number, number][]) {
       this.pickupSpawns.push({ type: 'health', pos: new THREE.Vector3(x, 1.2, z) });
     }
-    for (const [x, z] of [[0, 22], [0, -22], [38, 0], [-38, 0]] as [number, number][]) {
-      this.pickupSpawns.push({ type: 'ammo', pos: new THREE.Vector3(x, 1.2, z) });
+    // Per-weapon ammo with matched colours/icons; railgun is rare and central.
+    const ammoSpots: [import('../entities/Pickup').PickupType, number, number][] = [
+      ['ammo_rocket',   0,  22],
+      ['ammo_pulse',    0, -22],
+      ['ammo_shard',   38,   0],
+      ['ammo_shard',  -38,   0],
+      ['ammo_railgun', 22,   0],
+      ['ammo_railgun',-22,   0],
+    ];
+    for (const [type, x, z] of ammoSpots) {
+      this.pickupSpawns.push({ type, pos: new THREE.Vector3(x, 1.2, z) });
     }
     for (const [x, z] of [[14, -30], [-14, 30]] as [number, number][]) {
       this.pickupSpawns.push({ type: 'armor', pos: new THREE.Vector3(x, 1.2, z) });

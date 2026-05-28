@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Actor, ACTOR_EYE_OFFSET } from './Actor';
 import type { Game } from '../core/Game';
 import { forwardXZ, rightXZ, lookDir } from '../core/look';
-import { WEAPON_ORDER } from '../weapons/Weapons';
+import { WEAPON_ORDER, WEAPONS } from '../weapons/Weapons';
 import { createWeaponMesh, type WeaponMesh } from '../weapons/WeaponModels';
 
 const DODGE_TAP_WINDOW = 0.28;
@@ -32,10 +32,15 @@ export class Player extends Actor {
   private shardCharge = 0;
   /** game.time the railgun wind-up began (0 = not winding up). */
   private railChargeStart = 0;
+  /** True while the railgun is scoped (right-click held). */
+  ads = false;
+  /** Current camera FOV (lerped toward target when scoping in/out). */
+  private currentFov = 0;
 
   constructor(game: Game, name: string, spawnFeet: THREE.Vector3, camera: THREE.PerspectiveCamera) {
     super(game, name, 0x36e0ff, spawnFeet);
     this.camera = camera;
+    this.currentFov = camera.fov;
     this.buildViewmodels();
     camera.add(this.viewmodelRoot);
   }
@@ -72,8 +77,10 @@ export class Player extends Actor {
       return;
     }
 
-    // ---- mouse look ----
-    const sens = this.game.settings.sensitivity * 0.0022;
+    // ---- mouse look (slower while scoped) ----
+    const adsDef = WEAPONS[this.currentWeapon]?.ads;
+    const sensMul = this.ads && adsDef ? adsDef.sensMul : 1;
+    const sens = this.game.settings.sensitivity * 0.0022 * sensMul;
     this.yaw -= input.mouseDX * sens;
     this.pitch -= input.mouseDY * sens;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -PITCH_LIMIT, PITCH_LIMIT);
@@ -120,7 +127,7 @@ export class Player extends Actor {
     // drop any queued / charged state when the weapon changed
     if (w !== 'rocket') this.rocketLoaded = 0;
     if (w !== 'shard') this.shardCharge = 0;
-    if (w !== 'railgun') this.railChargeStart = 0;
+    if (w !== 'railgun') { this.railChargeStart = 0; this.ads = false; }
 
     if (w === 'rocket') {
       const ammo = this.ammo.rocket ?? 0;
@@ -150,6 +157,8 @@ export class Player extends Actor {
     }
 
     if (w === 'railgun') {
+      // right-click holds aim-down-sights (railgun-only scope)
+      this.ads = !!secondary && this.alive;
       // pressing fire commits a wind-up; the shot lands even if released early
       if (this.railChargeStart === 0 && primary &&
           this.canFire() && (this.ammo.railgun ?? 0) >= 1) {
@@ -193,6 +202,16 @@ export class Player extends Actor {
   }
 
   private applyCamera(dt: number, strafe: number) {
+    // ---- FOV (zoom for railgun ADS) ----
+    const adsDef = WEAPONS[this.currentWeapon]?.ads;
+    const targetFov = this.ads && adsDef ? adsDef.fov : this.game.settings.fov;
+    const k = 1 - Math.exp(-dt * 14);
+    this.currentFov += (targetFov - this.currentFov) * k;
+    if (Math.abs(this.camera.fov - this.currentFov) > 0.05) {
+      this.camera.fov = this.currentFov;
+      this.camera.updateProjectionMatrix();
+    }
+
     // view-bob while moving on the ground
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (this.grounded) this.bobPhase += dt * speed * 1.1;
@@ -231,10 +250,15 @@ export class Player extends Actor {
     this.recoil = Math.max(0, this.recoil - dt * 6);
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     const sway = Math.sin(this.bobPhase) * 0.012 * Math.min(1, speed / 8);
+    // ADS pulls the railgun toward the centre of the screen so the scope
+    // lens lines up with the crosshair.
+    const adsTx = this.ads ? 0 : 0.34;
+    const adsTy = this.ads ? -0.18 : -0.34;
+    const adsTz = this.ads ? -0.55 : -0.72;
     this.viewmodelRoot.position.set(
-      0.34 + sway,
-      -0.34 + Math.abs(sway) * 0.5 - this.recoil * 0.03,
-      -0.72 + this.recoil * 0.12,
+      adsTx + sway,
+      adsTy + Math.abs(sway) * 0.5 - this.recoil * 0.03,
+      adsTz + this.recoil * 0.12,
     );
     this.viewmodelRoot.rotation.x = this.recoil * 0.35;
 

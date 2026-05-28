@@ -43,6 +43,7 @@ function coreMat(color: number): THREE.MeshBasicMaterial {
 export function createWeaponMesh(id: string): WeaponMesh {
   const def = WEAPONS[id];
   const color = def ? def.color : 0x9aa7bd;
+  const accent = def ? def.accent : 0xffffff;
   const g = new THREE.Group() as WeaponMesh;
 
   const dark = metal(0x10141d, 0.9, 0.36);
@@ -74,14 +75,14 @@ export function createWeaponMesh(id: string): WeaponMesh {
       part(new THREE.BoxGeometry(0.066, 0.05, 0.52), dark, 0, 0.085, -0.05);
       part(new THREE.BoxGeometry(0.11, 0.05, 0.12), dark, 0, -0.02, 0.2); // breech block
       part(new THREE.BoxGeometry(0.05, 0.07, 0.05), coreMat(color), 0, 0.02, 0.2); // energy cell
-      // scope
+      // scope — body in primary, lens glows in accent (white)
       part(new THREE.CylinderGeometry(0.034, 0.034, 0.17, 12), dark, 0, 0.135, 0.0, HALF_PI);
-      part(new THREE.CylinderGeometry(0.03, 0.03, 0.025, 12), accentMat(color, 1.4), 0, 0.135, 0.09, HALF_PI);
+      part(new THREE.CylinderGeometry(0.03, 0.03, 0.025, 12), accentMat(accent, 1.8), 0, 0.135, 0.09, HALF_PI);
       // barrel
       part(new THREE.CylinderGeometry(0.027, 0.03, 0.74, 14), steel, 0, 0.0, -0.42, HALF_PI);
-      // side rails
-      part(new THREE.BoxGeometry(0.022, 0.03, 0.6), accentMat(color, 0.9), -0.06, 0.0, -0.12);
-      part(new THREE.BoxGeometry(0.022, 0.03, 0.6), accentMat(color, 0.9), 0.06, 0.0, -0.12);
+      // side rails — accent (white) trim against the cyan coils
+      part(new THREE.BoxGeometry(0.022, 0.03, 0.6), accentMat(accent, 1.0), -0.06, 0.0, -0.12);
+      part(new THREE.BoxGeometry(0.022, 0.03, 0.6), accentMat(accent, 1.0), 0.06, 0.0, -0.12);
       // magnetic accelerator coils
       const coilMats: THREE.MeshStandardMaterial[] = [];
       for (let i = 0; i < 5; i++) {
@@ -103,7 +104,7 @@ export function createWeaponMesh(id: string): WeaponMesh {
       // wide, chunky, aggressive — barrel cluster + raw crystal magazine
       part(new THREE.BoxGeometry(0.24, 0.17, 0.34), mid, 0, 0, -0.02);
       part(new THREE.BoxGeometry(0.27, 0.21, 0.12), dark, 0, 0, -0.22);
-      part(new THREE.BoxGeometry(0.28, 0.045, 0.3), accentMat(color, 0.95), 0, 0.105, -0.04);
+      part(new THREE.BoxGeometry(0.28, 0.045, 0.3), accentMat(accent, 1.1), 0, 0.105, -0.04);
       // four stubby barrels
       for (const sx of [-0.072, 0.072]) {
         for (const sy of [-0.05, 0.05]) {
@@ -114,9 +115,9 @@ export function createWeaponMesh(id: string): WeaponMesh {
       const crystalMat = accentMat(color, 1.3);
       const crystal = part(new THREE.IcosahedronGeometry(0.1, 0), crystalMat, 0, 0.18, 0.02);
       part(new THREE.IcosahedronGeometry(0.05, 0), coreMat(color), 0, 0.18, 0.02);
-      // jagged side shards
-      part(new THREE.OctahedronGeometry(0.055, 0), accentMat(color, 1.1), -0.15, 0.02, -0.05, 0.5, 0, 0.4);
-      part(new THREE.OctahedronGeometry(0.055, 0), accentMat(color, 1.1), 0.15, 0.02, -0.05, -0.5, 0, -0.4);
+      // jagged side shards — accent (emerald) so they pop against the amber body
+      part(new THREE.OctahedronGeometry(0.055, 0), accentMat(accent, 1.3), -0.15, 0.02, -0.05, 0.5, 0, 0.4);
+      part(new THREE.OctahedronGeometry(0.055, 0), accentMat(accent, 1.3), 0.15, 0.02, -0.05, -0.5, 0, -0.4);
       muzzle.position.set(0, 0, -0.54);
       animate = (t, f) => {
         crystal.rotation.y = t * 0.9;
@@ -136,9 +137,9 @@ export function createWeaponMesh(id: string): WeaponMesh {
       for (let i = 0; i < 3; i++) {
         part(new THREE.BoxGeometry(0.04, 0.07, 0.18), accentMat(color, 0.9), 0, 0.16, -0.05 - i * 0.13);
       }
-      // side accent conduits
-      part(new THREE.BoxGeometry(0.03, 0.04, 0.4), accentMat(color, 1.0), -0.12, 0.03, -0.1);
-      part(new THREE.BoxGeometry(0.03, 0.04, 0.4), accentMat(color, 1.0), 0.12, 0.03, -0.1);
+      // side accent conduits — crimson stripe down the orange tube
+      part(new THREE.BoxGeometry(0.03, 0.04, 0.4), accentMat(accent, 1.2), -0.12, 0.03, -0.1);
+      part(new THREE.BoxGeometry(0.03, 0.04, 0.4), accentMat(accent, 1.2), 0.12, 0.03, -0.1);
       // 3-barrel revolver cluster
       part(new THREE.CylinderGeometry(0.135, 0.135, 0.12, 18), dark, 0, 0.03, -0.42, HALF_PI);
       const whMat = accentMat(color, 1.2);
@@ -172,9 +173,9 @@ export function createWeaponMesh(id: string): WeaponMesh {
       // rotating accelerator rings around the barrel
       const ring1 = part(new THREE.TorusGeometry(0.082, 0.022, 8, 20), accentMat(color, 1.2), 0, 0.03, -0.26);
       const ring2 = part(new THREE.TorusGeometry(0.07, 0.02, 8, 20), accentMat(color, 1.2), 0, 0.03, -0.42);
-      // emissive conduits + heat fins
-      part(new THREE.BoxGeometry(0.024, 0.03, 0.36), accentMat(color, 1.0), -0.066, 0.0, -0.04);
-      part(new THREE.BoxGeometry(0.024, 0.03, 0.36), accentMat(color, 1.0), 0.066, 0.0, -0.04);
+      // emissive conduits + heat fins — magenta accent against the violet body
+      part(new THREE.BoxGeometry(0.024, 0.03, 0.36), accentMat(accent, 1.2), -0.066, 0.0, -0.04);
+      part(new THREE.BoxGeometry(0.024, 0.03, 0.36), accentMat(accent, 1.2), 0.066, 0.0, -0.04);
       for (let i = 0; i < 4; i++) {
         part(new THREE.BoxGeometry(0.11, 0.035, 0.022), accentMat(color, 0.85), 0, 0.12, 0.02 - i * 0.07);
       }
