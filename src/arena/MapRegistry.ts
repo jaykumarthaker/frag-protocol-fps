@@ -25,9 +25,9 @@ export const MAPS: readonly MapDef[] = [
     id: 'atrium',
     name: 'The Atrium',
     description:
-      'A sky citadel suspended over the void. Two team-coloured tower ' +
-      'bases flank a central spire; jump pads launch onto floating decks. ' +
-      'Step off the edge and you fall forever.',
+      'A Citadel-style sky arena of stacked tiers: two mountain bases drop ' +
+      'by wide causeways to a central ring, with a sunken valley beneath the ' +
+      'spire and an amp on the crown. Step off the edge and you fall forever.',
     modes: ['deathmatch'],
     factory: (s, p) => new AtriumArena(s, p),
   },
