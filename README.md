@@ -29,8 +29,9 @@ Create Room** — the server URL is pre-filled automatically.
 
 |  |  |
 |:-:|:-:|
-| ![Main menu](screenshots/menu.png)<br>**Main menu** — Deathmatch or Cash Raid | ![Cash Raid match](screenshots/cashraid-overview.png)<br>**Cash Raid** — raid vaults, bank the cash |
-| ![Vault and buy station](screenshots/cashraid-action.png)<br>**Vaults & buy stations** — spend banked money mid-match | ![Online lobby](screenshots/lobby.png)<br>**Online lobby** — invite-code rooms & team select |
+| ![The Atrium](screenshots/atrium.png)<br>**Deathmatch — The Atrium** — a multi-tier sky citadel | ![Atrium layout](screenshots/atrium-aerial.png)<br>**Stacked tiers** — mountain bases, causeways, a sunken valley |
+| ![Cash Raid match](screenshots/cashraid-overview.png)<br>**Cash Raid** — raid vaults, bank the cash | ![Vault and buy station](screenshots/cashraid-action.png)<br>**Vaults & buy stations** — spend banked money mid-match |
+| ![Main menu](screenshots/menu.png)<br>**Main menu** — Deathmatch or Cash Raid | ![Online lobby](screenshots/lobby.png)<br>**Online lobby** — invite-code rooms & team select |
 
 ## Play it
 
