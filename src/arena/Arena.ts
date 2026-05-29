@@ -351,8 +351,13 @@ export class Arena {
   protected ramp(start: THREE.Vector3, end: THREE.Vector3, width: number) {
     const thickness = 0.7;
     const fwd = end.clone().sub(start).normalize();
-    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), fwd).normalize();
-    const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+    // Build a RIGHT-HANDED basis (fwd, up, right): column order must satisfy
+    // fwd × up = right. A left-handed basis makes setFromRotationMatrix() return
+    // a bogus quaternion, so the collider ends up mis-oriented vs the mesh —
+    // unnoticeable on narrow ramps, but it tears fall-through gaps in wide ones
+    // (e.g. the Atrium causeway). Keep these crosses in this exact order.
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
     const length = end.distanceTo(start);
     const center = start.clone().add(end).multiplyScalar(0.5).addScaledVector(up, -thickness / 2);
 
