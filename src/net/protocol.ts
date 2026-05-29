@@ -83,10 +83,26 @@ export interface LobbyState {
   members: LobbyMember[];
 }
 
+/** One row in the room browser. `code` is present only for public rooms so
+ *  private invite codes stay secret — private rooms are listed but join only
+ *  with their code. */
+export interface RoomSummary {
+  code: string | null;
+  host: string;
+  mode: GameMode;
+  mapId: string;
+  players: number;     // human count
+  maxPlayers: number;
+  isPublic: boolean;
+  phase: 'lobby' | 'playing';
+  joinable: boolean;   // in lobby and not full
+}
+
 // ---- server -> client ----
 export type ServerMsg =
   | { t: 'roomJoined'; code: string; youId: number; host: boolean }
   | { t: 'lobbyState'; lobby: LobbyState }
+  | { t: 'roomList'; rooms: RoomSummary[] }
   | { t: 'roomError'; message: string }
   | { t: 'kicked' }
   | { t: 'matchStart'; youId: number; players: NetPlayer[]; match: NetMatch }
@@ -104,6 +120,11 @@ export type ServerMsg =
   | { t: 'cashSpawned'; dropId: number; x: number; y: number; z: number; amount: number }
   | { t: 'cashCollected'; dropId: number; byId: number; amount: number }
   | { t: 'cashExpired'; dropId: number }
+  // A weapon dropped by a dead carrier; any team can grab it (Cash Raid only —
+  // in deathmatch everyone already owns every weapon).
+  | { t: 'weaponSpawned'; dropId: number; x: number; y: number; z: number; weapon: string }
+  | { t: 'weaponCollected'; dropId: number; byId: number; weapon: string }
+  | { t: 'weaponExpired'; dropId: number }
   | { t: 'bankUpdate'; bank1: number; bank2: number }
   | { t: 'loadoutUpdate'; weapons: string[]; armor: number }
   | { t: 'cashEvent'; text: string };
@@ -112,6 +133,7 @@ export type ServerMsg =
 export type ClientMsg =
   | { t: 'createRoom'; name: string; config: LobbyConfig; character?: string }
   | { t: 'joinRoom'; code: string; name: string; character?: string }
+  | { t: 'listRooms' }
   | { t: 'lobbySetCharacter'; character: string }
   | { t: 'leaveRoom' }
   | { t: 'lobbySetReady'; ready: boolean }

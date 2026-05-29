@@ -8,9 +8,11 @@
  */
 import { WebSocketServer } from 'ws';
 import { Room, sanitiseCharacter } from './room.mjs';
+import { MAP_IDS } from './cashraid-map.mjs';
 
 const PORT = Number(process.env.PORT) || 2567;
 const TICK_MS = 50; // 20 Hz
+const MAX_ROOM_AGE_MS = 24 * 60 * 60 * 1000; // rooms live at most one day
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -36,12 +38,10 @@ function sanitiseConfig(raw) {
   };
   const mode = r.mode === 'cashraid' ? 'cashraid' : 'deathmatch';
   const diff = ['rookie', 'skilled', 'deadly'].includes(r.difficulty) ? r.difficulty : 'skilled';
-  // Map allowlist — must stay in sync with src/arena/MapRegistry.ts.
-  const dmMaps = ['atrium', 'duel'];
-  const crMaps = ['cashraid', 'vaultyard'];
-  const validMaps = mode === 'cashraid' ? crMaps : dmMaps;
-  const mapId = validMaps.includes(r.mapId) ? r.mapId
-    : (mode === 'cashraid' ? 'cashraid' : 'atrium');
+  // Every map plays in both modes (src/arena/MapRegistry.ts). MAP_IDS comes
+  // from the server map registry; fall back to each mode's default.
+  const mapId = MAP_IDS.includes(r.mapId) ? r.mapId
+    : (mode === 'cashraid' ? 'duel' : 'atrium');
   return {
     mode,
     maxPlayers: num(r.maxPlayers, 2, 12, 8),
@@ -92,6 +92,10 @@ wss.on('connection', (ws) => {
         player = room.addHuman(ws, msg.name, msg.character);
         send(ws, { t: 'roomJoined', code, youId: player.id, host: player.id === room.hostId });
         room.broadcastLobby();
+      } else if (msg.t === 'listRooms') {
+        // Room browser: list every room (public + private). Private rooms
+        // appear but their summary omits the code, so joining needs the code.
+        send(ws, { t: 'roomList', rooms: [...rooms.values()].map((r) => r.summary()) });
       } else {
         send(ws, { t: 'roomError', message: 'create or join a room first' });
       }
@@ -173,6 +177,16 @@ setInterval(() => {
   last = now;
   for (const [code, room] of rooms) {
     room.tick(dt);
+    // 24h cap: close the room and disconnect anyone still in it so the server
+    // doesn't fill up with abandoned rooms.
+    if (now - room.createdAt > MAX_ROOM_AGE_MS) {
+      for (const p of room.players.values()) {
+        if (p.ws && p.ws.readyState === 1) { send(p.ws, { t: 'kicked' }); p.ws.close(); }
+      }
+      rooms.delete(code);
+      console.log(`- room ${code} expired (24h)`);
+      continue;
+    }
     if (room.empty || room.players.size === 0) rooms.delete(code);
   }
 }, TICK_MS);

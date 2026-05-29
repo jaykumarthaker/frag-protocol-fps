@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Team } from '../core/types';
 import type { Actor } from './Actor';
-import type { BuyDef } from '../arena/CashRaidArena';
+import type { BuyDef } from '../arena/Arena';
 
 /**
  * A team's buy station: a cylindrical trigger area around a holographic
@@ -21,6 +21,9 @@ export class BuyStation {
     this.center = def.center.clone();
     this.radius = def.radius;
 
+    // Visuals are positioned relative to the station's floor (center.y) so the
+    // ring/holo read correctly on elevated bases (e.g. Atrium), not at y=0.
+    const y0 = this.center.y;
     // a glowing icosahedron hologram hovering inside the kiosk frame
     this.holo = new THREE.Mesh(
       new THREE.IcosahedronGeometry(1.1, 0),
@@ -29,7 +32,7 @@ export class BuyStation {
         transparent: true, opacity: 0.9,
       }),
     );
-    this.holo.position.set(this.center.x, 3.2, this.center.z);
+    this.holo.position.set(this.center.x, y0 + 3.2, this.center.z);
     this.group.add(this.holo);
 
     // glowing team-coloured ring on the floor that reads as the buy zone
@@ -37,7 +40,7 @@ export class BuyStation {
       new THREE.TorusGeometry(this.radius * 0.9, 0.14, 8, 36),
       new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.6 }),
     );
-    ring.position.set(this.center.x, 0.06, this.center.z);
+    ring.position.set(this.center.x, y0 + 0.06, this.center.z);
     ring.rotation.x = Math.PI / 2;
     this.group.add(ring);
 
@@ -48,12 +51,12 @@ export class BuyStation {
         color, transparent: true, opacity: 0.18, side: THREE.DoubleSide,
       }),
     );
-    disk.position.set(this.center.x, 0.04, this.center.z);
+    disk.position.set(this.center.x, y0 + 0.04, this.center.z);
     disk.rotation.x = -Math.PI / 2;
     this.group.add(disk);
 
     const light = new THREE.PointLight(0xffd23f, 8, 16);
-    light.position.set(this.center.x, 3.5, this.center.z);
+    light.position.set(this.center.x, y0 + 3.5, this.center.z);
     this.group.add(light);
 
     scene.add(this.group);
@@ -70,7 +73,7 @@ export class BuyStation {
     this.spin += dt;
     this.holo.rotation.y = this.spin * 1.3;
     this.holo.rotation.x = this.spin * 0.7;
-    this.holo.position.y = 3.2 + Math.sin(this.spin * 1.8) * 0.25;
+    this.holo.position.y = this.center.y + 3.2 + Math.sin(this.spin * 1.8) * 0.25;
   }
 
   dispose() {

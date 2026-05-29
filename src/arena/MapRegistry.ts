@@ -3,22 +3,23 @@ import type { Physics } from '../physics/Physics';
 import type { GameMode } from '../core/types';
 import { Arena } from './Arena';
 import { AtriumArena } from './AtriumArena';
-import { CashRaidArena } from './CashRaidArena';
-import { VaultYardArena } from './VaultYardArena';
 
 /**
  * Map registry. Each entry describes one playable arena and how to construct
- * it. The Game looks up the requested map by id when starting a match; new
- * maps just add an entry here.
+ * it. There are two maps and both play in every mode — the Cash Raid vault /
+ * kiosk structures are layered on at runtime by `Arena.addCashRaidStructures()`,
+ * so the map list is identical regardless of the chosen game mode.
  */
 export interface MapDef {
   id: string;
   name: string;
   description: string;
-  /** Modes this map supports. Maps shown in the menu are filtered by mode. */
+  /** Modes this map supports (all maps support both). */
   modes: GameMode[];
   factory: (scene: THREE.Scene, physics: Physics) => Arena;
 }
+
+const BOTH: GameMode[] = ['deathmatch', 'cashraid'];
 
 export const MAPS: readonly MapDef[] = [
   {
@@ -28,40 +29,23 @@ export const MAPS: readonly MapDef[] = [
       'A Citadel-style sky arena of stacked tiers: two mountain bases drop ' +
       'by wide causeways to a central ring, with a sunken valley beneath the ' +
       'spire and an amp on the crown. Step off the edge and you fall forever.',
-    modes: ['deathmatch'],
+    modes: BOTH,
     factory: (s, p) => new AtriumArena(s, p),
   },
   {
     id: 'duel',
     name: 'Foundry Duel',
     description:
-      'Compact central platform with side ledges. Tight rotations and ' +
-      'short sightlines — built for 1v1 and small matches.',
-    modes: ['deathmatch'],
+      'Compact central platform with side ledges. Tight rotations and short ' +
+      'sightlines — fast brawls in deathmatch, short steal cycles in Cash Raid.',
+    modes: BOTH,
     factory: (s, p) => new Arena(s, p),
-  },
-  {
-    id: 'cashraid',
-    name: 'Vault Standoff',
-    description:
-      'Two opposing bases with vaults and buy stations across a contested midfield.',
-    modes: ['cashraid'],
-    factory: (s, p) => new CashRaidArena(s, p),
-  },
-  {
-    id: 'vaultyard',
-    name: 'Vault Yard',
-    description:
-      'Compact close-quarters Cash Raid map. Vaults sit against the back ' +
-      'wall, mid is a low cover ring — short steal cycles, brawl pace.',
-    modes: ['cashraid'],
-    factory: (s, p) => new VaultYardArena(s, p),
   },
 ];
 
 export const DEFAULT_MAP: Record<GameMode, string> = {
   deathmatch: 'atrium',
-  cashraid: 'cashraid',
+  cashraid: 'duel',
 };
 
 export function getMap(id: string | undefined, mode: GameMode): MapDef {

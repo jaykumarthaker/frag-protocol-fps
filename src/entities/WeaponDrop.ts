@@ -9,9 +9,9 @@ import type { Actor } from './Actor';
  * plus a slug of ammo. Fades out and removes itself after `LIFETIME`
  * seconds so the floor doesn't accumulate clutter over a long match.
  *
- * Offline-only for now; online matches use the shop in Cash Raid and
- * everyone shares a loadout in deathmatch, so a server-authoritative
- * drop system would be a bigger change.
+ * Offline matches own collection + expiry locally. Online Cash Raid drops are
+ * `passive`: the server owns collection/expiry (loadout is authoritative), so
+ * these are visual-only and the Game disposes them on server events.
  */
 const LIFETIME = 30;
 const COLLECT_RADIUS = 1.8;
@@ -22,18 +22,27 @@ export class WeaponDrop {
   pos: THREE.Vector3;
   group = new THREE.Group();
   dead = false;
+  /** Server drop id (online); 0 for offline drops. */
+  id = 0;
 
   private game: Game;
   private mesh: WeaponMesh;
   private halo: THREE.Mesh;
   private bornAt: number;
   private clock = 0;
+  /** Online drops are visual-only — the server owns collection / expiry. */
+  private passive: boolean;
 
-  constructor(game: Game, weaponId: string, pos: THREE.Vector3) {
+  constructor(
+    game: Game, weaponId: string, pos: THREE.Vector3,
+    opts?: { id?: number; passive?: boolean },
+  ) {
     this.game = game;
     this.weaponId = weaponId;
     this.pos = pos.clone();
     this.bornAt = game.time;
+    this.id = opts?.id ?? 0;
+    this.passive = opts?.passive ?? false;
 
     const color = WEAPONS[weaponId]?.color ?? 0xb98bff;
     this.mesh = createWeaponMesh(weaponId);
@@ -72,6 +81,9 @@ export class WeaponDrop {
       const blink = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.clock * 14));
       this.group.visible = blink > 0.6 || remaining > 1.5;
     }
+
+    // online drops are visual only — the server owns collection + expiry
+    if (this.passive) return;
     if (remaining <= 0) { this.expire(); return; }
 
     this.tryCollect();

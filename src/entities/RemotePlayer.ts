@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Actor, ACTOR_FEET_OFFSET } from './Actor';
 import { createCharacter, createHalo, type CharacterInstance, type CharacterAnim } from '../core/Models';
 import { makeNameTag } from './nameTag';
+import { createCashTag, type CashTag } from './cashTag';
 import type { Game } from '../core/Game';
 import type { NetPlayer } from '../net/protocol';
 
@@ -19,6 +20,7 @@ export class RemotePlayer extends Actor {
   netId: number;
   anim = 'Idle';
   private robot: CharacterInstance;
+  private cashTag: CashTag;
   private buffer: Snap[] = [];
 
   constructor(game: Game, np: NetPlayer) {
@@ -31,6 +33,8 @@ export class RemotePlayer extends Actor {
     this.mesh.add(this.robot.root);
     this.mesh.add(createHalo(np.color));
     this.mesh.add(makeNameTag(np.name, np.color));
+    this.cashTag = createCashTag();
+    this.mesh.add(this.cashTag.sprite);
     this.applySnapshot(np);
   }
 
@@ -90,6 +94,7 @@ export class RemotePlayer extends Actor {
   protected override updateVisual(dt: number) {
     this.robot.setWeapon(this.currentWeapon);
     this.robot.update(dt);
+    this.cashTag.setAmount(this.alive ? this.carried : 0);
     this.robot.play((this.anim as CharacterAnim) || 'Idle');
   }
 }
