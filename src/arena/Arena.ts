@@ -2,10 +2,25 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Physics } from '../physics/Physics';
 import type { PickupType } from '../entities/Pickup';
+import type { Team } from '../core/types';
 
 export interface PickupSpawn {
   type: PickupType;
   pos: THREE.Vector3;
+}
+
+/** A vault deposit/steal zone — an axis-aligned trigger box. */
+export interface VaultDef {
+  team: Team;
+  center: THREE.Vector3;
+  halfExtents: THREE.Vector3;
+}
+
+/** A buy-station kiosk — a cylindrical trigger area. */
+export interface BuyDef {
+  team: Team;
+  center: THREE.Vector3;
+  radius: number;
 }
 
 export interface JumpPad {
@@ -30,6 +45,13 @@ export class Arena {
   jumpPads: JumpPad[] = [];
   waypoints: THREE.Vector3[] = [];
   waypointLinks: number[][] = [];
+
+  // ---- Cash Raid overlay (populated by addCashRaidStructures) ----------
+  // These are layered onto the shared map at runtime, only in Cash Raid, so
+  // the same map works in every mode. Empty / unused in deathmatch.
+  teamSpawns: Record<number, THREE.Vector3[]> = { 1: [], 2: [] };
+  vaultDefs: VaultDef[] = [];
+  buyDefs: BuyDef[] = [];
 
   protected scene: THREE.Scene;
   protected physics: Physics;
@@ -454,5 +476,137 @@ export class Arena {
         this.waypointLinks[j].push(i);
       }
     }
+  }
+
+  // ===================================================================
+  //  Cash Raid overlay — vault / kiosk / team spawns layered at runtime
+  // ===================================================================
+
+  /**
+   * Build the Cash Raid structures (vault bunkers, buy kiosks, team spawns)
+   * for this map. Called by the Game ONLY when the match mode is Cash Raid,
+   * after `build()`. The base implementation lays out the generic blockout
+   * (Foundry Duel) as two opposing bases; concrete maps override this with
+   * their own anchor coordinates. Must be mirrored in
+   * `server/cashraid-map.mjs` for online play.
+   */
+  addCashRaidStructures() {
+    // Team 1 base toward -z, team 2 toward +z (mirror of the layout).
+    this.addVaultBunker(1, 0, -24, { width: 12, depth: 8, height: 5.5, gap: 5 });
+    this.addVaultBunker(2, 0,  24, { width: 12, depth: 8, height: 5.5, gap: 5 });
+    this.addKiosk(1,  16, -24, { radius: 5, scale: 0.9 });
+    this.addKiosk(2, -16,  24, { radius: 5, scale: 0.9 });
+    this.addTeamSpawns(1, [
+      new THREE.Vector3(22, 0.05, -22), new THREE.Vector3(-22, 0.05, -22),
+      new THREE.Vector3(0, 0.05, -26), new THREE.Vector3(26, 0.05, 0),
+    ]);
+    this.addTeamSpawns(2, [
+      new THREE.Vector3(22, 0.05, 22), new THREE.Vector3(-22, 0.05, 22),
+      new THREE.Vector3(0, 0.05, 26), new THREE.Vector3(-26, 0.05, 0),
+    ]);
+  }
+
+  /**
+   * A fortified vault pocket centred at (cx, cz): a tall back wall, two side
+   * walls, two front "wings" leaving a deposit slot, a lintel and four corner
+   * posts. The opening faces `openToward` (a z sign), defaulting toward the
+   * map centre. Also records the trigger zone in `vaultDefs`.
+   */
+  protected addVaultBunker(
+    team: Team, cx: number, cz: number,
+    opts?: {
+      openToward?: 1 | -1; width?: number; depth?: number;
+      height?: number; gap?: number; baseY?: number;
+    },
+  ) {
+    const W = opts?.width ?? 14;
+    const D = opts?.depth ?? 9;
+    const H = opts?.height ?? 6;
+    const gap = opts?.gap ?? 6;
+    const y0 = opts?.baseY ?? 0;       // floor the bunker sits on (elevated bases)
+    // Default: the slot faces the map centre (z = 0).
+    const s = opts?.openToward ?? (cz >= 0 ? -1 : 1);
+    const frontZ = cz + (s * D) / 2;   // opening side (toward mid)
+    const backZ = cz - (s * D) / 2;    // solid back wall
+
+    const m = this.matStruct;
+    // Back wall + two side walls.
+    this.box(cx, y0 + H / 2, backZ, W, H, 1.2, m);
+    this.box(cx - W / 2, y0 + H / 2, cz, 1.2, H, D, m);
+    this.box(cx + W / 2, y0 + H / 2, cz, 1.2, H, D, m);
+    // Front wings leaving a `gap`-wide deposit slot in the middle.
+    const wingW = (W - gap) / 2;
+    this.box(cx - W / 2 + wingW / 2, y0 + H / 2, frontZ, wingW, H, 1.2, m);
+    this.box(cx + W / 2 - wingW / 2, y0 + H / 2, frontZ, wingW, H, 1.2, m);
+    // Lintel across the entry — reads as a doorway frame.
+    this.box(cx, y0 + H - 0.6, frontZ, gap, 1.2, 1.2, m);
+    // Corner posts rising above the parapet.
+    for (const px of [cx - W / 2, cx + W / 2]) {
+      for (const pz of [cz - D / 2, cz + D / 2]) {
+        this.box(px, y0 + H + 1.2, pz, 1.6, 3.6, 1.6, m);
+      }
+    }
+
+    this.vaultDefs.push({
+      team,
+      center: new THREE.Vector3(cx, y0, cz),
+      halfExtents: new THREE.Vector3(W / 2 - 0.6, 3.0, D / 2 - 0.6),
+    });
+  }
+
+  /**
+   * A buy-station kiosk at (cx, cz): a two-step podium framed by four posts
+   * and a glowing top ring. `scale` shrinks the whole structure; `radius` is
+   * the interaction trigger radius recorded in `buyDefs`.
+   */
+  protected addKiosk(
+    team: Team, cx: number, cz: number,
+    opts?: { radius?: number; scale?: number; baseY?: number },
+  ) {
+    const sc = opts?.scale ?? 1.0;
+    const radius = opts?.radius ?? 5.5;
+    const y0 = opts?.baseY ?? 0;
+    const m = this.matStruct;
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(4.0 * sc, 4.4 * sc, 0.5, 24), m,
+    );
+    base.position.set(cx, y0 + 0.25, cz);
+    base.castShadow = true; base.receiveShadow = true;
+    this.root.add(base);
+    this.colliders.push(this.physics.addStaticBox(cx, y0 + 0.25, cz, 4.0 * sc, 0.25, 4.0 * sc));
+
+    const tier = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.0 * sc, 3.3 * sc, 0.45, 24), m,
+    );
+    tier.position.set(cx, y0 + 0.725, cz);
+    tier.castShadow = true; tier.receiveShadow = true;
+    this.root.add(tier);
+    this.colliders.push(this.physics.addStaticBox(cx, y0 + 0.725, cz, 3.0 * sc, 0.225, 3.0 * sc));
+
+    const postH = 5.0 * sc;
+    const off = 2.4 * sc;
+    for (const [ox, oz] of [[-off, -off], [off, -off], [-off, off], [off, off]] as [number, number][]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, postH, 0.4), m);
+      post.position.set(cx + ox, y0 + 0.7 + postH / 2, cz + oz);
+      post.castShadow = true; post.receiveShadow = true;
+      this.root.add(post);
+    }
+    const lintelMat = new THREE.MeshStandardMaterial({
+      color: 0xffd23f, emissive: 0xffd23f, emissiveIntensity: 1.4, roughness: 0.5,
+    });
+    const lintel = new THREE.Mesh(
+      new THREE.TorusGeometry(2.8 * sc, 0.15, 8, 32), lintelMat,
+    );
+    lintel.position.set(cx, y0 + 0.7 + postH + 0.15, cz);
+    lintel.rotation.x = Math.PI / 2;
+    this.root.add(lintel);
+
+    this.buyDefs.push({ team, center: new THREE.Vector3(cx, y0, cz), radius });
+  }
+
+  /** Register a team's Cash Raid spawn points (cloned). */
+  protected addTeamSpawns(team: Team, pts: THREE.Vector3[]) {
+    for (const p of pts) this.teamSpawns[team].push(p.clone());
   }
 }

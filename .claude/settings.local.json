@@ -17,7 +17,15 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(powershell.exe -NoProfile -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
-      "Read(//c/Program Files/**)"
+      "Read(//c/Program Files/**)",
+      "Bash(ls -la \"C:/Users/admin/.claude/projects/d--temp-frag-protocol-fps/memory/\" 2>/dev/null && echo \"---MEMORY.md---\" && cat \"C:/Users/admin/.claude/projects/d--temp-frag-protocol-fps/memory/MEMORY.md\" 2>/dev/null || echo \"no memory dir/file yet\")",
+      "Bash(timeout 120 node shot4.mjs)",
+      "Bash(timeout 120 node shot5.mjs)",
+      "Bash(cp /tmp/frag-shots/atrium_hero.png atrium.png)",
+      "Bash(cp /tmp/frag-shots/atrium_aerial.png atrium-aerial.png)",
+      "Bash(cp /tmp/frag-shots/cr_overview.png cashraid-overview.png)",
+      "Bash(cp /tmp/frag-shots/cr_action.png cashraid-action.png)",
+      "PowerShell(try { $p = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"Stopped dev server PID $p on :5177\" } } catch { \"No listener on :5177\" })"
     ]
   }
 }

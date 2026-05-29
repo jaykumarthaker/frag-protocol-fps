@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Physics } from '../physics/Physics';
 import { Arena } from '../arena/Arena';
-import { CashRaidArena } from '../arena/CashRaidArena';
 import { MAPS, getMap } from '../arena/MapRegistry';
 import { Input } from './Input';
 import { Audio } from '../audio/Audio';
@@ -197,6 +196,9 @@ export class Game {
       onMainMenu: () => g.toMainMenu(),
       onCreateRoom: (url, name, config) => g.createRoom(url, name, config),
       onJoinRoom: (url, name, code) => g.joinRoom(url, name, code),
+      onBrowseRooms: (url, name) => g.browseRooms(url, name),
+      onRefreshRooms: () => g.refreshRooms(),
+      onJoinRoomCode: (code) => g.joinByCode(code),
       onLeaveRoom: () => g.leaveOnline(),
       onLobbyReady: (r) => g.lobbySetReady(r),
       onLobbySelectTeam: (t) => g.lobbySelectTeam(t),
@@ -564,22 +566,23 @@ export class Game {
     this.player = null;
   }
 
-  /** The current arena as a CashRaidArena, or null in deathmatch. */
-  get cashArena(): CashRaidArena | null {
-    return this.arena instanceof CashRaidArena ? this.arena : null;
-  }
+  /** Mode+map of the currently-built arena, used to detect when a swap is
+   *  needed. Keyed on both because Cash Raid layers extra structures on the
+   *  same map, so a mode change must rebuild even if the map id is unchanged. */
+  private currentArenaKey: string | null = null;
 
-  /** Id of the currently-built map, used to detect when a swap is needed. */
-  private currentMapId: string | null = null;
-
-  /** Swap the live arena to the requested map (lookup via the registry). */
+  /** Swap the live arena to the requested map + mode (lookup via the registry).
+   *  In Cash Raid the map's vault/kiosk/team-spawn structures are layered on
+   *  after the base geometry is built. */
   private ensureArena(mode: GameMode, mapId?: string) {
     const def = getMap(mapId, mode);
-    if (this.currentMapId === def.id) return;
+    const key = `${mode}:${def.id}`;
+    if (this.currentArenaKey === key) return;
     if (this.arena) this.arena.dispose();
     this.arena = def.factory(this.scene, this.physics);
     this.arena.build();
-    this.currentMapId = def.id;
+    if (mode === 'cashraid') this.arena.addCashRaidStructures();
+    this.currentArenaKey = key;
   }
 
   private restart() {
@@ -646,6 +649,9 @@ export class Game {
   private spawnCandidates(actor?: Actor): THREE.Vector3[] {
     const all = this.arena.spawnPoints;
     if (this.gameMode !== 'cashraid' || !actor || actor.team === 0) return all;
+    // Prefer the map's authored per-team spawns (any map can host Cash Raid).
+    const team = this.arena.teamSpawns[actor.team];
+    if (team && team.length) return team;
     const half = Math.ceil(all.length / 2);
     return actor.team === 1 ? all.slice(0, half) : all.slice(half);
   }
@@ -861,10 +867,11 @@ export class Game {
   //  Cash Raid
   // ===================================================================
 
-  /** Build the vault zones + buy-station kiosks for the active map. */
+  /** Build the vault zones + buy-station kiosks for the active map. Reads the
+   *  anchor data the arena's `addCashRaidStructures()` produced (works for any
+   *  map — the structures are layered on at runtime in Cash Raid). */
   private buildCashZones() {
-    const arena = this.cashArena;
-    if (!arena) return;
+    const arena = this.arena;
     for (const def of arena.vaultDefs) {
       this.vaults.push(new VaultZone(this.scene, def, TEAM_COLORS[def.team]));
     }
@@ -924,7 +931,8 @@ export class Game {
     const ownVault = this.vaults.find((v) => v.team === p.team && v.containsActor(p));
     const enemyVault = this.vaults.find((v) => v.team !== p.team && v.containsActor(p));
     const canDeposit = !!ownVault && p.carried > 0;
-    const canSteal = !!enemyVault;
+    // You may only raid while carrying nothing — bank your haul first.
+    const canSteal = !!enemyVault && p.carried <= 0;
 
     if ((canDeposit || canSteal) && this.input.key('KeyE')) {
       if (p.depositChannelStart === 0) p.depositChannelStart = this.time;
@@ -940,6 +948,7 @@ export class Game {
       p.depositChannelStart = 0;
       if (this.buyMenu.isOpen) this.hud.setPrompt('');
       else if (canDeposit) this.hud.setPrompt(`HOLD  E  TO DEPOSIT  $${Math.floor(p.carried).toLocaleString()}`);
+      else if (enemyVault && p.carried > 0) this.hud.setPrompt(`CARRYING  $${Math.floor(p.carried).toLocaleString()}  —  BANK IT FIRST`);
       else if (enemyVault) this.hud.setPrompt('HOLD  E  TO RAID THE ENEMY VAULT');
       else if (atBuy) this.hud.setPrompt('PRESS  B  TO BUY');
       else this.hud.setPrompt('');
@@ -968,7 +977,8 @@ export class Game {
     const ownVault = this.vaults.find((v) => v.team === bot.team && v.containsActor(bot));
     const enemyVault = this.vaults.find((v) => v.team !== bot.team && v.containsActor(bot));
     const canDeposit = !!ownVault && bot.carried > 0;
-    const canSteal = !!enemyVault;
+    // Raid only while empty — must bank the haul before raiding again.
+    const canSteal = !!enemyVault && bot.carried <= 0;
     if (bot.wantVaultInteract && (canDeposit || canSteal)) {
       if (bot.depositChannelStart === 0) bot.depositChannelStart = this.time;
       if (this.time - bot.depositChannelStart >= DEPOSIT_TIME) {
@@ -1064,6 +1074,31 @@ export class Game {
     });
   }
 
+  /** Connect, then request the room list (opens the browser screen). */
+  async browseRooms(url: string, name: string) {
+    const net = await this.connectServer(url, name);
+    net?.send({ t: 'listRooms' });
+  }
+
+  /** Re-request the room list on the open browser connection. */
+  refreshRooms() {
+    if (this.net?.connected) this.net.send({ t: 'listRooms' });
+    else this.browseRooms(this.onlineUrl, this.onlineName);
+  }
+
+  /** Join a room by code, reusing the browser's live connection if present. */
+  joinByCode(code: string) {
+    const trimmed = code.toUpperCase().trim();
+    if (this.net?.connected) {
+      this.net.send({
+        t: 'joinRoom', code: trimmed,
+        name: this.onlineName, character: this.characterId,
+      });
+    } else {
+      this.joinRoom(this.onlineUrl, this.onlineName, trimmed);
+    }
+  }
+
   /** Persist the player's character pick + notify the server when online. */
   setCharacter(id: string) {
     if (!CHARACTERS.some((c) => c.id === id)) return;
@@ -1114,6 +1149,7 @@ export class Game {
     switch (msg.t) {
       case 'roomJoined':    this.onRoomJoined(msg); break;
       case 'lobbyState':    this.onLobbyState(msg); break;
+      case 'roomList':      this.menu.showRoomBrowser(msg.rooms); break;
       case 'roomError':     this.menu.showOnlineHub(msg.message); break;
       case 'kicked':        this.onKicked(); break;
       case 'matchStart':    this.onMatchStart(msg); break;
@@ -1127,6 +1163,9 @@ export class Game {
       case 'cashSpawned':   this.onCashSpawned(msg); break;
       case 'cashCollected': this.onCashCollected(msg); break;
       case 'cashExpired':   this.onCashExpired(msg); break;
+      case 'weaponSpawned': this.onWeaponSpawned(msg); break;
+      case 'weaponCollected': this.onWeaponCollected(msg); break;
+      case 'weaponExpired': this.onWeaponExpired(msg); break;
       case 'bankUpdate':    this.onBankUpdate(msg); break;
       case 'loadoutUpdate': this.onLoadoutUpdate(msg); break;
       case 'cashEvent':     this.hud.addCashEvent(msg.text); break;
@@ -1296,6 +1335,33 @@ export class Game {
     if (i < 0) return;
     this.cashDrops[i].dispose();
     this.cashDrops.splice(i, 1);
+  }
+
+  private onWeaponSpawned(msg: Extract<ServerMsg, { t: 'weaponSpawned' }>) {
+    this.weaponDrops.push(new WeaponDrop(
+      this, msg.weapon, new THREE.Vector3(msg.x, msg.y, msg.z),
+      { id: msg.dropId, passive: true },
+    ));
+  }
+
+  private onWeaponCollected(msg: Extract<ServerMsg, { t: 'weaponCollected' }>) {
+    const i = this.weaponDrops.findIndex((d) => d.id === msg.dropId);
+    if (i < 0) return;
+    const d = this.weaponDrops[i];
+    this.effects.flash(d.pos.clone().setY(d.pos.y + 0.6), WEAPONS[msg.weapon]?.color ?? 0xb98bff, 2, 0.3);
+    this.audio.play('pickup', d.pos);
+    if (msg.byId === this.localId) {
+      this.hud.notifyPickup(WEAPONS[msg.weapon]?.name ?? msg.weapon.toUpperCase());
+    }
+    d.dispose();
+    this.weaponDrops.splice(i, 1);
+  }
+
+  private onWeaponExpired(msg: Extract<ServerMsg, { t: 'weaponExpired' }>) {
+    const i = this.weaponDrops.findIndex((d) => d.id === msg.dropId);
+    if (i < 0) return;
+    this.weaponDrops[i].dispose();
+    this.weaponDrops.splice(i, 1);
   }
 
   private onBankUpdate(msg: Extract<ServerMsg, { t: 'bankUpdate' }>) {
@@ -1472,6 +1538,7 @@ export class Game {
       for (const v of this.vaults) v.update(dt);
       for (const b of this.buyStations) b.update(dt);
       for (const d of this.cashDrops) d.update(dt);
+      for (const d of this.weaponDrops) d.update(dt); // passive — server owns collection
       this.updateOnlineCashInteract();
     }
 
@@ -1513,10 +1580,12 @@ export class Game {
 
     const ownVault = this.vaults.find((v) => v.team === p.team && v.containsActor(p));
     const enemyVault = this.vaults.find((v) => v.team !== p.team && v.containsActor(p));
+    const carrying = p.carried > 0;
     if (this.buyMenu.isOpen) this.hud.setPrompt('');
-    else if (ownVault && p.carried > 0 && this.input.key('KeyE')) this.hud.setPrompt('DEPOSITING…');
-    else if (enemyVault && this.input.key('KeyE')) this.hud.setPrompt('RAIDING VAULT…');
-    else if (ownVault && p.carried > 0) this.hud.setPrompt(`HOLD  E  TO DEPOSIT  $${Math.floor(p.carried).toLocaleString()}`);
+    else if (ownVault && carrying && this.input.key('KeyE')) this.hud.setPrompt('DEPOSITING…');
+    else if (enemyVault && !carrying && this.input.key('KeyE')) this.hud.setPrompt('RAIDING VAULT…');
+    else if (ownVault && carrying) this.hud.setPrompt(`HOLD  E  TO DEPOSIT  $${Math.floor(p.carried).toLocaleString()}`);
+    else if (enemyVault && carrying) this.hud.setPrompt(`CARRYING  $${Math.floor(p.carried).toLocaleString()}  —  BANK IT FIRST`);
     else if (enemyVault) this.hud.setPrompt('HOLD  E  TO RAID THE ENEMY VAULT');
     else if (atBuy) this.hud.setPrompt('PRESS  B  TO BUY');
     else this.hud.setPrompt('');

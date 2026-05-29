@@ -3,6 +3,7 @@ import { Actor } from './Actor';
 import { BotBrain } from '../ai/BotBrain';
 import { createCharacter, createHalo, type CharacterInstance, type CharacterAnim } from '../core/Models';
 import { makeNameTag } from './nameTag';
+import { createCashTag, type CashTag } from './cashTag';
 import type { Game } from '../core/Game';
 import type { MatchConfig } from '../core/types';
 
@@ -10,6 +11,7 @@ import type { MatchConfig } from '../core/types';
 export class Bot extends Actor {
   private brain: BotBrain;
   private robot: CharacterInstance;
+  private cashTag: CashTag;
   /** Cash Raid: true when the bot is channelling a vault deposit / steal. */
   wantVaultInteract = false;
 
@@ -29,6 +31,8 @@ export class Bot extends Actor {
     this.mesh.add(this.robot.root);
     this.mesh.add(createHalo(colorHex));
     this.mesh.add(makeNameTag(this.name, colorHex));
+    this.cashTag = createCashTag();
+    this.mesh.add(this.cashTag.sprite);
   }
 
   update(dt: number) {
@@ -41,6 +45,7 @@ export class Bot extends Actor {
   protected override updateVisual(dt: number) {
     this.robot.setWeapon(this.currentWeapon);
     this.robot.update(dt);
+    this.cashTag.setAmount(this.alive ? this.carried : 0);
     let anim: CharacterAnim;
     if (!this.alive) anim = 'Death';
     else if (!this.grounded) anim = 'Jump';

@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import type { Actor } from '../entities/Actor';
 import type { MatchConfig, GameMode, Team } from '../core/types';
 import type { CashRaidRules } from '../game/CashRaidRules';
-import type { LobbyConfig, LobbyState } from '../net/protocol';
+import type { LobbyConfig, LobbyState, RoomSummary } from '../net/protocol';
 import { teamName } from '../game/teams';
 import {
   CHARACTERS, loadCharacter, createCharacter, isCharacterAvailable,
   type CharacterInstance,
 } from '../core/Models';
-import { mapsForMode, DEFAULT_MAP } from '../arena/MapRegistry';
+import { MAPS, mapsForMode, DEFAULT_MAP } from '../arena/MapRegistry';
 
 /** Cash Raid economy defaults used for offline / instant-action matches. */
 export const CASHRAID_START_MONEY = 20000;
@@ -34,6 +34,12 @@ export interface MenuHandlers {
   onMainMenu: () => void;
   onCreateRoom: (url: string, name: string, config: LobbyConfig) => void;
   onJoinRoom: (url: string, name: string, code: string) => void;
+  /** Connect and open the room browser (lists all public + private rooms). */
+  onBrowseRooms: (url: string, name: string) => void;
+  /** Re-request the room list on the open browser connection. */
+  onRefreshRooms: () => void;
+  /** Join a room by code on the live browser connection (public or private). */
+  onJoinRoomCode: (code: string) => void;
   onLeaveRoom: () => void;
   onLobbyReady: (ready: boolean) => void;
   onLobbySelectTeam: (team: 1 | 2) => void;
@@ -384,8 +390,9 @@ export class Menu {
           <input type="text" id="o-url" value="${this.serverUrl}" style="${this.inputCss}"></div>
         ${error ? `<div class="form-error">⚠ ${error}</div>` : ''}
         <div class="btn-row">
-          <button class="primary" id="o-create">Create Room</button>
-          <button id="o-join">Join Room</button>
+          <button class="primary" id="o-browse">Browse Rooms</button>
+          <button id="o-create">Create Room</button>
+          <button id="o-join">Join by Code</button>
           <button id="o-back">Back</button>
         </div>
       </div>
@@ -396,6 +403,9 @@ export class Menu {
     const grab = () => {
       this.playerName = ((s.querySelector('#o-name') as HTMLInputElement).value.trim() || 'PLAYER').slice(0, 14);
       this.serverUrl = (s.querySelector('#o-url') as HTMLInputElement).value.trim() || this.serverUrl;
+    };
+    (s.querySelector('#o-browse') as HTMLButtonElement).onclick = () => {
+      grab(); this.showConnecting(); this.h.onBrowseRooms(this.serverUrl, this.playerName);
     };
     (s.querySelector('#o-create') as HTMLButtonElement).onclick = () => { grab(); this.showCreateRoom(); };
     (s.querySelector('#o-join') as HTMLButtonElement).onclick = () => { grab(); this.showJoinRoom(); };
@@ -547,6 +557,73 @@ export class Menu {
       this.h.onJoinRoom(this.serverUrl, this.playerName, code);
     };
     (s.querySelector('#j-back') as HTMLButtonElement).onclick = () => this.showOnlineHub();
+  }
+
+  /** Room browser — lists every room (public + private). Public rooms join
+   *  directly; private rooms are listed locked and join via the code box. */
+  showRoomBrowser(rooms: RoomSummary[]) {
+    this.clear();
+    const s = document.createElement('div');
+    s.className = 'screen';
+
+    const mapName = (id: string) => MAPS.find((m) => m.id === id)?.name ?? id;
+    const modeName = (m: string) => (m === 'cashraid' ? 'Cash Raid' : 'Deathmatch');
+
+    const rowsHtml = rooms.length === 0
+      ? `<div class="rb-empty">No rooms yet — create one from the hub.</div>`
+      : rooms.map((r, i) => {
+          const lock = r.isPublic ? '' : '<span class="rb-lock">🔒 PRIVATE</span>';
+          const status = r.phase === 'playing' ? '<span class="rb-live">IN MATCH</span>'
+            : r.joinable ? '' : '<span class="rb-full">FULL</span>';
+          const canJoin = r.isPublic && r.joinable && r.code;
+          const btn = canJoin
+            ? `<button class="rb-join" data-i="${i}">Join</button>`
+            : r.isPublic ? `<button class="rb-join" disabled>—</button>`
+            : `<span class="rb-codeonly">code required</span>`;
+          return `
+            <div class="rb-row">
+              <div class="rb-main">
+                <span class="rb-host">${r.host}</span>
+                <span class="rb-meta">${modeName(r.mode)} · ${mapName(r.mapId)}</span>
+              </div>
+              <div class="rb-side">
+                ${lock}${status}
+                <span class="rb-count">${r.players}/${r.maxPlayers}</span>
+                ${btn}
+              </div>
+            </div>`;
+        }).join('');
+
+    s.innerHTML = `
+      <div class="logo" style="font-size:42px;">ROOM <span class="x">BROWSER</span></div>
+      <div class="tag">Public rooms join directly · private rooms need their code</div>
+      <div class="menu-card" style="min-width:520px;">
+        <div class="rb-list">${rowsHtml}</div>
+        <div class="field" style="margin-top:12px;"><label>Join by code</label>
+          <input type="text" id="rb-code" maxlength="6" placeholder="ABC123"
+            style="${this.inputCss}text-transform:uppercase;letter-spacing:4px;">
+          <button id="rb-code-go">Join</button></div>
+        <div class="btn-row">
+          <button class="primary" id="rb-refresh">Refresh</button>
+          <button id="rb-back">Back</button>
+        </div>
+      </div>
+    `;
+    this.container.appendChild(s);
+
+    s.querySelectorAll('.rb-join[data-i]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const r = rooms[Number((b as HTMLElement).dataset.i)];
+        if (r?.code) this.h.onJoinRoomCode(r.code);
+      });
+    });
+    const codeInput = s.querySelector('#rb-code') as HTMLInputElement;
+    (s.querySelector('#rb-code-go') as HTMLButtonElement).onclick = () => {
+      const code = codeInput.value.trim().toUpperCase();
+      if (code) this.h.onJoinRoomCode(code);
+    };
+    (s.querySelector('#rb-refresh') as HTMLButtonElement).onclick = () => this.h.onRefreshRooms();
+    (s.querySelector('#rb-back') as HTMLButtonElement).onclick = () => this.h.onLeaveRoom();
   }
 
   /** Pre-match lobby — re-rendered on every server lobbyState. */

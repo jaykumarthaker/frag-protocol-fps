@@ -60,12 +60,16 @@ export class CashRaidRules implements MatchRules {
   }
 
   /**
-   * Raid the enemy vault — extracts a fixed haul of cash onto the raider.
-   * The vault is a money source: the loot is fresh, not drawn from a bank,
-   * so banked totals can actually climb to the win target.
+   * Raid the enemy vault — extracts a single fixed haul of cash onto the
+   * raider. You can only raid while carrying nothing: one raid grants exactly
+   * STEAL_PER_TAP and you must bank it before raiding again (so a raider can't
+   * camp the vault and stack an unlimited haul). The vault is a money source —
+   * the loot is fresh, not drawn from a bank — so banks can climb to the win
+   * target. Recovered death-drops may push `carried` above the cap; that's
+   * intentional (loot, not minted).
    */
   steal(actor: Actor, amount = STEAL_PER_TAP): number {
-    if (actor.team === 0) return 0;
+    if (actor.team === 0 || actor.carried > 0) return 0;
     actor.carried += amount;
     actor.moneyStolen += amount;
     return amount;

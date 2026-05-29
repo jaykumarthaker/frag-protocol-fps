@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Team } from '../core/types';
 import { ACTOR_FEET_OFFSET, type Actor } from './Actor';
-import type { VaultDef } from '../arena/CashRaidArena';
+import type { VaultDef } from '../arena/Arena';
 
 /**
  * A team's vault: an axis-aligned trigger box. Standing in it lets you deposit
@@ -24,6 +24,10 @@ export class VaultZone {
     this.halfExtents = def.halfExtents.clone();
 
     const he = this.halfExtents;
+    // Visuals are positioned relative to the vault's floor (center.y) so the
+    // pad/beacon read correctly on elevated bases (e.g. Atrium's plateaus),
+    // not down at world y=0.
+    const y0 = this.center.y;
     // floor pad — fills most of the bunker interior so the deposit zone reads
     this.pad = new THREE.Mesh(
       new THREE.CylinderGeometry(he.x * 0.85, he.x * 0.95, 0.22, 32),
@@ -31,7 +35,7 @@ export class VaultZone {
         color, emissive: color, emissiveIntensity: 1.4, roughness: 0.4,
       }),
     );
-    this.pad.position.set(this.center.x, 0.12, this.center.z);
+    this.pad.position.set(this.center.x, y0 + 0.12, this.center.z);
     this.group.add(this.pad);
 
     // a slow-spinning holographic beacon column
@@ -42,7 +46,7 @@ export class VaultZone {
         transparent: true, opacity: 0.85,
       }),
     );
-    this.beacon.position.set(this.center.x, 2.4, this.center.z);
+    this.beacon.position.set(this.center.x, y0 + 2.4, this.center.z);
     this.beacon.rotation.x = Math.PI / 2;
     this.group.add(this.beacon);
 
@@ -55,11 +59,11 @@ export class VaultZone {
         transparent: true, opacity: 0.55, side: THREE.DoubleSide,
       }),
     );
-    column.position.set(this.center.x, 2.95, this.center.z);
+    column.position.set(this.center.x, y0 + 2.95, this.center.z);
     this.group.add(column);
 
     const light = new THREE.PointLight(color, 8, 18);
-    light.position.set(this.center.x, 3.5, this.center.z);
+    light.position.set(this.center.x, y0 + 3.5, this.center.z);
     this.group.add(light);
 
     scene.add(this.group);
@@ -79,7 +83,7 @@ export class VaultZone {
   update(dt: number) {
     this.spin += dt;
     this.beacon.rotation.z = this.spin * 0.9;
-    this.beacon.position.y = 2.4 + Math.sin(this.spin * 1.6) * 0.25;
+    this.beacon.position.y = this.center.y + 2.4 + Math.sin(this.spin * 1.6) * 0.25;
   }
 
   dispose() {

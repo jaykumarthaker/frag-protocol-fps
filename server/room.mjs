@@ -55,9 +55,30 @@ export class Room {
     this.map = getMap(config.mapId);
     this.match = this.freshMatch();
     this.cashDrops = [];
+    this.weaponDrops = [];
     this.nextDropId = 1;
     this.resetAt = 0;
     this.empty = false;
+    this.createdAt = Date.now();   // for the 24h room TTL
+  }
+
+  /** Compact projection for the room browser. The invite code is exposed only
+   *  for public rooms so private codes stay secret (private rooms still appear
+   *  in the list, but joining one needs its code). */
+  summary() {
+    const humans = [...this.players.values()].filter((p) => !p.isBot).length;
+    const host = this.players.get(this.hostId);
+    return {
+      code: this.config.isPublic ? this.code : null,
+      host: host ? host.name : '—',
+      mode: this.config.mode,
+      mapId: this.config.mapId,
+      players: humans,
+      maxPlayers: this.config.maxPlayers,
+      isPublic: !!this.config.isPublic,
+      phase: this.phase,
+      joinable: this.phase === 'lobby' && humans < this.config.maxPlayers,
+    };
   }
 
   get cash() { return this.config.mode === 'cashraid'; }
@@ -69,7 +90,7 @@ export class Room {
       fragLimit: c.fragLimit, winnerId: 0,
       bank1: c.startMoney, bank2: c.startMoney,
       winTarget: c.winTarget, winnerTeam: 0,
-      mapId: c.mapId || (c.mode === 'cashraid' ? 'cashraid' : 'atrium'),
+      mapId: c.mapId || (c.mode === 'cashraid' ? 'duel' : 'atrium'),
     };
   }
 
@@ -154,6 +175,7 @@ export class Room {
     this.clock = 0;
     this.match = this.freshMatch();
     this.cashDrops = [];
+    this.weaponDrops = [];
 
     // fill with bots
     for (let i = 0; i < this.config.botCount; i++) {
@@ -202,7 +224,8 @@ export class Room {
 
   /** Pick a spawn for a player and reset their vitals. */
   spawn(p, atStart = false) {
-    let pts = DM_SPAWNS;
+    // Use the resolved map's spawns so every map/mode spawns correctly.
+    let pts = this.map.SPAWNS || DM_SPAWNS;
     if (this.cash && p.team !== 0) pts = this.map.TEAM_SPAWNS[p.team];
     // furthest from live enemies
     let best = pts[0], bestScore = -1;
@@ -312,6 +335,21 @@ export class Room {
       }
     }
 
+    // Cash Raid: drop the victim's weapon (a grant-copy, like offline) for any
+    // team to grab. Skip the free pulse rifle. The victim keeps their own
+    // purchased loadout on respawn — this is a bonus, not a confiscation.
+    if (this.cash && victim.weapon && victim.weapon !== 'pulse') {
+      const id = this.nextDropId++;
+      this.weaponDrops.push({
+        id, x: victim.x, y: victim.y, z: victim.z,
+        weapon: victim.weapon, expireAt: this.clock + CASH_LIFETIME,
+      });
+      this.broadcast({
+        t: 'weaponSpawned', dropId: id,
+        x: victim.x, y: victim.y, z: victim.z, weapon: victim.weapon,
+      });
+    }
+
     this.broadcast({
       t: 'kill', killerId: suicide ? 0 : attacker.id,
       victimId: victim.id, weapon, headshot,
@@ -353,6 +391,7 @@ export class Room {
       if (this.cash) {
         this.updateChannels();
         this.updateCashDrops();
+        this.updateWeaponDrops();
       }
       // respawns
       const now = Date.now();
@@ -383,7 +422,9 @@ export class Room {
       if (!p.alive) { p.depositChannel = 0; continue; }
       const v = this.map.vaultAt(p.x, p.y, p.z);
       const mine = v && v.team === p.team;
-      const valid = v && ((mine && p.carried > 0) || (!mine && v));
+      // Deposit needs carried cash; raiding the enemy vault is only allowed
+      // while empty-handed (one haul at a time — bank before raiding again).
+      const valid = v && ((mine && p.carried > 0) || (!mine && p.carried <= 0));
       if (p.interact && valid) {
         if (p.depositChannel === 0) p.depositChannel = this.clock;
         if (this.clock - p.depositChannel >= DEPOSIT_TIME) {
@@ -409,6 +450,7 @@ export class Room {
   }
 
   steal(p) {
+    if (p.carried > 0) return; // one haul at a time — must bank first
     p.carried += STEAL_AMOUNT;
     p.moneyStolen += STEAL_AMOUNT;
     this.broadcast({ t: 'cashEvent', text: `${p.name} raided  $${STEAL_AMOUNT.toLocaleString()}` });
@@ -430,6 +472,29 @@ export class Room {
           p.moneyStolen += d.amount;
           this.cashDrops.splice(i, 1);
           this.broadcast({ t: 'cashCollected', dropId: d.id, byId: p.id, amount: d.amount });
+          break;
+        }
+      }
+    }
+  }
+
+  updateWeaponDrops() {
+    for (let i = this.weaponDrops.length - 1; i >= 0; i--) {
+      const d = this.weaponDrops[i];
+      if (this.clock >= d.expireAt) {
+        this.weaponDrops.splice(i, 1);
+        this.broadcast({ t: 'weaponExpired', dropId: d.id });
+        continue;
+      }
+      for (const p of this.players.values()) {
+        if (!p.alive || p.loadout.has(d.weapon)) continue; // already armed → leave it
+        const dx = p.x - d.x, dz = p.z - d.z, dy = p.y - d.y;
+        if (dx * dx + dz * dz + dy * dy < 3.6) {
+          p.loadout.add(d.weapon);
+          this.weaponDrops.splice(i, 1);
+          this.send(p, { t: 'loadoutUpdate', weapons: [...p.loadout], armor: p.armor });
+          this.broadcast({ t: 'weaponCollected', dropId: d.id, byId: p.id, weapon: d.weapon });
+          this.broadcast({ t: 'cashEvent', text: `${p.name} grabbed a ${d.weapon}` });
           break;
         }
       }
@@ -473,6 +538,7 @@ export class Room {
   resetMatch() {
     this.match = this.freshMatch();
     this.cashDrops = [];
+    this.weaponDrops = [];
     this.resetAt = 0;
     this.clock = 0;
     for (const p of this.players.values()) {

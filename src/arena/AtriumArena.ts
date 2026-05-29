@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Arena } from './Arena';
+import type { Team } from '../core/types';
 
 /**
  * "The Atrium" — a UT2003-CTF-Citadel-inspired arena built for verticality.
@@ -88,11 +89,13 @@ export class AtriumArena extends Arena {
 
     // ---- climb-out ramps (valley floor → island ring, through the gaps) -
     // Walkable stone slopes (~41°) so players AND bots always have a ground
-    // route out of the pit.
-    this.ramp(new THREE.Vector3(0, VALLEY_Y, -(VALLEY_HALF - 8)),
-              new THREE.Vector3(0, 0, -(VALLEY_HALF + 6)), 9);
-    this.ramp(new THREE.Vector3(0, VALLEY_Y,  (VALLEY_HALF - 8)),
-              new THREE.Vector3(0, 0,  (VALLEY_HALF + 6)), 9);
+    // route out of the pit. They top out exactly at the island's inner edge
+    // (z = ±VALLEY_HALF); landing them deeper (under the ring deck) made the
+    // deck strip overhang the ramp head and block the climb.
+    this.ramp(new THREE.Vector3(0, VALLEY_Y, -(VALLEY_HALF - 14)),
+              new THREE.Vector3(0, 0, -VALLEY_HALF), 9);
+    this.ramp(new THREE.Vector3(0, VALLEY_Y,  (VALLEY_HALF - 14)),
+              new THREE.Vector3(0, 0,  VALLEY_HALF), 9);
 
     // =====================================================================
     //  ISLAND RING  (0) — deck donut around the pit; bridges land here
@@ -140,8 +143,10 @@ export class AtriumArena extends Arena {
     const buildBase = (sign: 1 | -1, color: number) => {
       const cz = sign * BASE_Z;
 
-      // Rock massif the plateau sits on — a tapering floating mountain.
-      this.box(0, BASE_Y - 9, cz, (BASE_HX - 1) * 2, 18, (BASE_HZ + 1) * 2, this.matStone);
+      // Rock massif the plateau sits on — a tapering floating mountain. Its
+      // top is tucked just under the plateau deck (deck spans 7.4–9.0) instead
+      // of sharing the deck's top plane, which otherwise z-fights ("blips").
+      this.box(0, BASE_Y - 9.7, cz, (BASE_HX - 1) * 2, 18, (BASE_HZ + 1) * 2, this.matStone);
       this.box(0, BASE_Y - 19, cz, (BASE_HX - 8) * 2, 12, (BASE_HZ - 5) * 2, this.matStone);
 
       // Plateau deck
@@ -276,6 +281,32 @@ export class AtriumArena extends Arena {
   }
 
   /**
+   * Cash Raid overlay: the two mountain bases double as team bases. South
+   * (blue) = team 1, north (orange) = team 2. A vault sits near the back of
+   * each plateau (opening toward mid) with a kiosk off to one side; team
+   * spawns line up behind the vault. Carrying cash means braving the void
+   * crossing between the elevated bases.
+   */
+  override addCashRaidStructures() {
+    const { BASE_Z, BASE_Y } = this;
+    for (const [team, sign] of [[1, -1], [2, 1]] as [Team, 1 | -1][]) {
+      const cz = sign * BASE_Z;
+      const toMid = (-sign) as 1 | -1;
+      // Vault toward the back of the plateau, opening toward the bridges.
+      this.addVaultBunker(team, 0, cz + sign * 7, {
+        openToward: toMid, width: 14, depth: 7, height: 5, gap: 6, baseY: BASE_Y,
+      });
+      // Kiosk off to one side of the plateau.
+      this.addKiosk(team, sign * 16, cz, { radius: 5.5, baseY: BASE_Y });
+      // Team spawns behind the vault, on the plateau.
+      const spawnZ = cz + sign * 12;
+      this.addTeamSpawns(team, [-16, -6, 6, 16].map(
+        (sx) => new THREE.Vector3(sx, BASE_Y + 0.05, spawnZ),
+      ));
+    }
+  }
+
+  /**
    * Nav graph spanning all four tiers. The valley is walled in, so its nodes
    * only reach the island via nodes laid along the climb-out ramps — that
    * guarantees A* always has a ground route into and out of the pit.
@@ -311,11 +342,12 @@ export class AtriumArena extends Arena {
       [RI - 3, RI - 3], [-(RI - 3), RI - 3], [RI - 3, -(RI - 3)], [-(RI - 3), -(RI - 3)],
     ] as [number, number][]) W(x, 0, z);
 
-    // Climb-out ramp nodes (link the valley floor to the island ring).
+    // Climb-out ramp nodes (link the valley floor to the island ring). These
+    // match the ramp endpoints (foot z=±6, mid z=±13, top on the deck).
     for (const sign of [-1, 1] as const) {
-      W(0, 0, sign * (VALLEY_HALF + 4));            // ramp top (on island)
-      W(0, VALLEY_Y / 2, sign * VALLEY_HALF);       // ramp middle (in the gap)
-      W(0, VALLEY_Y, sign * (VALLEY_HALF - 8));      // ramp foot (valley floor)
+      W(0, 0, sign * (VALLEY_HALF + 4));            // ramp top (on island deck)
+      W(0, VALLEY_Y / 2, sign * (VALLEY_HALF - 7)); // ramp middle (z≈±13, y=-6)
+      W(0, VALLEY_Y, sign * (VALLEY_HALF - 14));     // ramp foot (z≈±6, valley floor)
     }
     // Valley-floor combat nodes (around the spire base; offset from the ramp
     // feet so they don't land on top of the ramp nodes).

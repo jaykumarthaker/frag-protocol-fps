@@ -4,9 +4,10 @@
  * team spawns and a waypoint graph). Coordinates here mirror the matching
  * client arena under src/arena/; keep them in sync by hand.
  *
- * The room receives a `mapId` in its config and looks up the matching entry
- * via `getMap(mapId)`. Bot helpers (`nearestWp`, `findPath`) take the map as
- * a parameter so different rooms can run different geometries simultaneously.
+ * There are two maps (atrium, duel) and both play in either mode. The room
+ * receives a `mapId` and looks up the matching entry via `getMap(mapId)`. Bot
+ * helpers (`nearestWp`, `findPath`) take the map as a parameter so different
+ * rooms can run different geometries simultaneously.
  */
 
 /** Mirror a team-1 local (x,z) to a team's world coordinates. */
@@ -48,144 +49,122 @@ function buyStationAtFactory(BUY_STATIONS) {
 }
 
 // =====================================================================
-//  Map: 'cashraid' — Vault Standoff (the original wide arena)
-//  Mirrors src/arena/CashRaidArena.ts.
+//  Map: 'atrium' — The Atrium (vertical; mountain bases double as team
+//  bases). Mirrors src/arena/AtriumArena.ts addCashRaidStructures().
+//  Server bots have no physics/gravity, so they glide at base height across
+//  the void — best-effort nav on this vertical map.
 // =====================================================================
-function buildVaultStandoff() {
-  const BASE_Z = 44;
+function buildAtrium() {
+  const BASE_Z = 78, BASE_Y = 9, BASE_HX = 26, BASE_HZ = 16;
+  // sign: team 1 = south (-z), team 2 = north (+z).
+  const sgn = (team) => (team === 1 ? -1 : 1);
+
   const VAULTS = [1, 2].map((team) => {
-    const [x, z] = mir(team, -14, -BASE_Z);
-    return { team, x, y: 0, z, hx: 6.4, hy: 3.0, hz: 3.9 };
+    const s = sgn(team);
+    // vault centre = (0, BASE_Y, cz + s*7); W=14, D=7 → hx 6.4, hz 2.9.
+    return { team, x: 0, y: BASE_Y, z: s * BASE_Z + s * 7, hx: 6.4, hy: 3.0, hz: 2.9 };
   });
   const BUY_STATIONS = [1, 2].map((team) => {
-    const [x, z] = mir(team, 16, -BASE_Z + 2);
-    return { team, x, y: 0, z, radius: 5.5 };
+    const s = sgn(team);
+    return { team, x: s * 16, y: BASE_Y, z: s * BASE_Z, radius: 5.5 };
   });
   const TEAM_SPAWNS = { 1: [], 2: [] };
   for (const team of [1, 2]) {
-    for (const lx of [-20, -8, 4, 16]) {
-      const [x, z] = mir(team, lx, -BASE_Z - 6);
-      TEAM_SPAWNS[team].push([x, 0.05, z]);
-    }
+    const s = sgn(team);
+    const spawnZ = s * BASE_Z + s * 12;
+    for (const sx of [-16, -6, 6, 16]) TEAM_SPAWNS[team].push([sx, BASE_Y + 0.05, spawnZ]);
   }
-  const WAYPOINTS = [];
-  const wp = (team, x, z, y = 0) => {
-    const [wx, wz] = mir(team, x, z);
-    WAYPOINTS.push([wx, y, wz]);
-  };
+  // Deathmatch spawns: base fronts (BASE_HZ-8) + two sky decks.
+  const SPAWNS = [];
   for (const team of [1, 2]) {
-    wp(team, -14, -BASE_Z);
-    wp(team, -14, -36);
-    wp(team, 16, -42);
-    wp(team, 0, -34);
-    wp(team, 36, -24);
-    wp(team, -36, -24);
+    const s = sgn(team);
+    for (const sx of [-16, -6, 6, 16]) SPAWNS.push([sx, BASE_Y + 0.05, s * BASE_Z + s * (BASE_HZ - 8)]);
+  }
+  SPAWNS.push([26, 22.6, 0], [-26, 22.6, 0]);
+
+  // Waypoints: base back/front + causeway chain + island ring. autoLink(24)
+  // connects base→causeway→island→causeway→base without crossing the void.
+  const WAYPOINTS = [];
+  for (const team of [1, 2]) {
+    const s = sgn(team);
+    WAYPOINTS.push([0, BASE_Y, s * BASE_Z + s * 12]);          // spawn line
+    WAYPOINTS.push([-16, BASE_Y, s * BASE_Z + s * 12]);
+    WAYPOINTS.push([16, BASE_Y, s * BASE_Z + s * 12]);
+    WAYPOINTS.push([0, BASE_Y, s * (BASE_Z - BASE_HZ)]);       // base front
+    WAYPOINTS.push([0, 6.75, s * 54]);                         // causeway chain
+    WAYPOINTS.push([0, 4.5, s * 46]);
+    WAYPOINTS.push([0, 2.25, s * 38]);
   }
   for (const [x, z] of [
-    [38, 0], [-38, 0], [22, 18], [-22, 18], [22, -18], [-22, -18],
-    [0, 24], [0, -24], [38, 18], [-38, -18], [38, -18], [-38, 18],
+    [0, -25], [0, 25], [25, 0], [-25, 0],
+    [22, 22], [-22, 22], [22, -22], [-22, -22],
   ]) WAYPOINTS.push([x, 0, z]);
-  WAYPOINTS.push([0, 5, 0], [7, 5, 7], [-7, 5, -7], [7, 5, -7], [-7, 5, 7]);
   const LINKS = autoLink(WAYPOINTS, 24);
 
-  // Solid sight-blockers (2D AABBs) mirroring the wall/cover boxes in
-  // src/arena/CashRaidArena.ts. Used by the bot LOS check so server bots
-  // can't shoot through walls. Outer boundary walls and elevated ledges are
-  // omitted (bot↔target lines never cross them on the ground).
+  // LOS blockers: the central spire (14×14 at y≈9) + the two vault bunkers.
   const WALLS = [];
   const wall = (x, z, hx, hz) => WALLS.push({ x, z, hx, hz });
-  const twall = (team, x, z, hx, hz) => { const [wx, wz] = mir(team, x, z); wall(wx, wz, hx, hz); };
-  wall(0, 0, 10, 10); // central raised platform (20×20)
+  wall(0, 0, 7, 7); // spire trunk
   for (const team of [1, 2]) {
-    // vault bunker (back wall, two sides, two front wings)
-    twall(team, -14, -48.5, 7, 0.6);
-    twall(team, -21, -44, 0.6, 4.5);
-    twall(team, -7, -44, 0.6, 4.5);
-    twall(team, -19, -39.5, 2, 0.6);
-    twall(team, -9, -39.5, 2, 0.6);
-    // base approach cover
-    twall(team, 3, -30, 0.6, 5);
-    twall(team, -4, -36, 2.5, 0.6);
-  }
-  for (const [x, z] of [[12, 16], [22, 4], [16, -20], [30, 22], [6, 26], [-18, 8]]) {
-    wall(x, z, 2, 2); wall(-x, -z, 2, 2);           // mid-field crates (4×4)
-  }
-  for (const [x, z] of [[24, -14], [-4, 18], [34, 4]]) {
-    wall(x, z, 1.3, 1.3); wall(-x, -z, 1.3, 1.3);   // mid-field pillars (2.6×2.6)
+    const s = sgn(team);
+    const vz = s * BASE_Z + s * 7;          // vault centre z
+    const frontZ = vz + s * 3.5, backZ = vz - s * 3.5;
+    wall(0, backZ, 7, 0.6);                 // back wall
+    wall(-7, vz, 0.6, 3.5); wall(7, vz, 0.6, 3.5); // side walls
+    wall(-5, frontZ, 2, 0.6); wall(5, frontZ, 2, 0.6); // front wings
   }
 
   return {
-    id: 'cashraid', VAULTS, BUY_STATIONS, TEAM_SPAWNS, WAYPOINTS, LINKS, WALLS,
+    id: 'atrium', VAULTS, BUY_STATIONS, TEAM_SPAWNS, SPAWNS, WAYPOINTS, LINKS, WALLS,
     vaultAt: vaultAtFactory(VAULTS),
     buyStationAt: buyStationAtFactory(BUY_STATIONS),
   };
 }
 
 // =====================================================================
-//  Map: 'vaultyard' — Vault Yard (compact, close-quarters)
-//  Mirrors src/arena/VaultYardArena.ts.
+//  Map: 'duel' — Foundry Duel (the generic blockout). Mirrors the base
+//  Arena.addCashRaidStructures() default overlay + base build() cover.
 // =====================================================================
-function buildVaultYard() {
-  // Smaller footprint, vaults pushed closer to mid for a brawl-pace map.
-  const BASE_Z = 32;
-  const VAULTS = [1, 2].map((team) => {
-    const [x, z] = mir(team, 0, -BASE_Z);
-    return { team, x, y: 0, z, hx: 5.4, hy: 3.0, hz: 3.4 };
-  });
-  const BUY_STATIONS = [1, 2].map((team) => {
-    const [x, z] = mir(team, -18, -BASE_Z + 1);
-    return { team, x, y: 0, z, radius: 5.0 };
-  });
-  const TEAM_SPAWNS = { 1: [], 2: [] };
-  for (const team of [1, 2]) {
-    for (const lx of [-12, -4, 4, 12]) {
-      const [x, z] = mir(team, lx, -BASE_Z - 5);
-      TEAM_SPAWNS[team].push([x, 0.05, z]);
-    }
-  }
-  const WAYPOINTS = [];
-  const wp = (team, x, z, y = 0) => {
-    const [wx, wz] = mir(team, x, z);
-    WAYPOINTS.push([wx, y, wz]);
+function buildDuel() {
+  const VAULTS = [
+    { team: 1, x: 0, y: 0, z: -24, hx: 5.4, hy: 3.0, hz: 3.4 }, // W=12,D=8
+    { team: 2, x: 0, y: 0, z: 24, hx: 5.4, hy: 3.0, hz: 3.4 },
+  ];
+  const BUY_STATIONS = [
+    { team: 1, x: 16, y: 0, z: -24, radius: 5 },
+    { team: 2, x: -16, y: 0, z: 24, radius: 5 },
+  ];
+  const TEAM_SPAWNS = {
+    1: [[22, 0.05, -22], [-22, 0.05, -22], [0, 0.05, -26], [26, 0.05, 0]],
+    2: [[22, 0.05, 22], [-22, 0.05, 22], [0, 0.05, 26], [-26, 0.05, 0]],
   };
-  for (const team of [1, 2]) {
-    wp(team, 0, -BASE_Z);          // vault
-    wp(team, 0, -BASE_Z + 6);      // vault mouth
-    wp(team, -18, -BASE_Z + 1);    // buy station
-    wp(team, 0, -BASE_Z + 14);     // base mouth
-    wp(team,  18, -BASE_Z + 8);    // right flank in
-    wp(team, -18, -BASE_Z + 14);   // left lane forward
-  }
-  // Mid-field corridor + flank nodes
-  for (const [x, z] of [
-    [0, 0], [10, 0], [-10, 0],
-    [22, 10], [-22, 10], [22, -10], [-22, -10],
-    [0, 12], [0, -12],
-  ]) WAYPOINTS.push([x, 0, z]);
-  const LINKS = autoLink(WAYPOINTS, 20);
+  const SPAWNS = [...TEAM_SPAWNS[1], ...TEAM_SPAWNS[2]];
 
-  // Solid sight-blockers mirroring src/arena/VaultYardArena.ts (see the
-  // matching note in buildVaultStandoff).
+  const WAYPOINTS = [];
+  const R = 23;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    WAYPOINTS.push([Math.cos(a) * R, 0, Math.sin(a) * R]);
+  }
+  WAYPOINTS.push([0, 0, 17], [0, 0, -17], [17, 0, 0], [-17, 0, 0], [0, 4.5, 0]);
+  const LINKS = autoLink(WAYPOINTS, 18);
+
   const WALLS = [];
   const wall = (x, z, hx, hz) => WALLS.push({ x, z, hx, hz });
-  const twall = (team, x, z, hx, hz) => { const [wx, wz] = mir(team, x, z); wall(wx, wz, hx, hz); };
-  for (const [x, z] of [[6, 2], [-6, -2], [2, 6], [-2, -6]]) wall(x, z, 1.6, 1.6); // central cover ring
-  wall(0, 14, 1.1, 1.1); wall(0, -14, 1.1, 1.1);   // long-axis pillars
-  for (const team of [1, 2]) {
-    // vault bunker (back wall, two sides, two front wings)
-    twall(team, 0, -35.5, 5.5, 0.6);
-    twall(team, -5.5, -32, 0.6, 3.5);
-    twall(team, 5.5, -32, 0.6, 3.5);
-    twall(team, -4, -28.5, 1.5, 0.6);
-    twall(team, 4, -28.5, 1.5, 0.6);
-    // base-front L-cover
-    twall(team, -6, -24, 2.5, 0.6);
-    twall(team, 6, -24, 2.5, 0.6);
-    twall(team, 0, -20, 0.6, 2);
+  wall(0, 0, 7, 7); // central platform (14×14)
+  for (const [x, z] of [[14, 14], [-14, 14], [14, -14], [-14, -14]]) wall(x, z, 1, 1);
+  for (const [x, z] of [[9, -2], [-9, 2], [2, 9], [-2, -9], [20, 8], [-20, -8]]) wall(x, z, 1.5, 1.5);
+  // vault bunkers (CR): back wall + sides + front wings, per team.
+  for (const v of VAULTS) {
+    const s = v.z >= 0 ? -1 : 1;               // opening toward mid
+    const frontZ = v.z + s * 4, backZ = v.z - s * 4; // D=8 → ±4
+    wall(0, backZ, 6, 0.6);                     // W=12 → hx6
+    wall(-6, v.z, 0.6, 4); wall(6, v.z, 0.6, 4);
+    wall(-3.5, frontZ, 2.5, 0.6); wall(3.5, frontZ, 2.5, 0.6); // gap=5, wingW=3.5
   }
 
   return {
-    id: 'vaultyard', VAULTS, BUY_STATIONS, TEAM_SPAWNS, WAYPOINTS, LINKS, WALLS,
+    id: 'duel', VAULTS, BUY_STATIONS, TEAM_SPAWNS, SPAWNS, WAYPOINTS, LINKS, WALLS,
     vaultAt: vaultAtFactory(VAULTS),
     buyStationAt: buyStationAtFactory(BUY_STATIONS),
   };
@@ -223,14 +202,14 @@ export function losBlocked(map, x0, z0, x1, z1) {
 }
 
 const MAPS = {
-  cashraid: buildVaultStandoff(),
-  vaultyard: buildVaultYard(),
+  atrium: buildAtrium(),
+  duel: buildDuel(),
 };
 
-/** Get a map by id, falling back to the default Vault Standoff. */
+/** Get a map by id, falling back to Foundry Duel (the Cash Raid default). */
 export function getMap(mapId) {
-  return MAPS[mapId] || MAPS.cashraid;
+  return MAPS[mapId] || MAPS.duel;
 }
 
-/** List of all known Cash Raid map ids — used by the server allowlist. */
+/** List of all known map ids — used by the server allowlist. */
 export const MAP_IDS = Object.keys(MAPS);

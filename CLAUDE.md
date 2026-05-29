@@ -46,9 +46,13 @@ manual smoke tests.
   catalogue.
 - **`src/entities/`** — `Actor` base (player + bots), `Player`, `Bot`,
   `RemotePlayer`; plus Cash Raid `VaultZone`, `BuyStation`, `CashDrop`.
-- **`src/arena/`** — `Arena` (deathmatch blockout) and `CashRaidArena` (a
-  two-base map) which `extends Arena`; arenas swap by mode via
-  `Game.ensureArena`.
+- **`src/arena/`** — two maps: `Arena` (the "Foundry Duel" blockout, used
+  directly) and `AtriumArena`. **Every map plays in both modes.** A map's static
+  geometry is built in `build()`; the Cash Raid vault bunkers + buy kiosks + team
+  spawns are layered on at runtime by `addCashRaidStructures()` (using the base
+  helpers `addVaultBunker` / `addKiosk` / `addTeamSpawns`, which populate
+  `vaultDefs` / `buyDefs` / `teamSpawns`). `Game.ensureArena` rebuilds on a
+  `mode:mapId` key and calls `addCashRaidStructures()` only in Cash Raid.
 - **`src/ai/BotBrain.ts`** — perception, A* nav, combat; plus Cash Raid
   raid/carry/defend objectives.
 - **`src/net/protocol.ts`** — the wire protocol. Shared in spirit with the
@@ -68,9 +72,11 @@ manual smoke tests.
 - **The server owns all online money.** Carried cash, team banks, drops,
   deposits and purchases are authoritative on the server. Clients render and
   request only. Offline play simulates the economy client-side in `Game.ts`.
-- **`server/cashraid-map.mjs` must match `src/arena/CashRaidArena.ts`.** The
-  server has no Three.js; the map module is plain data (`[x,y,z]` tuples).
-  Changing the map means updating both.
+- **`server/cashraid-map.mjs` must match each arena's `addCashRaidStructures()`.**
+  The server has no Three.js; the map module is plain data (`[x,y,z]` tuples) with
+  one entry per map id (`atrium`, `duel`), each carrying `VAULTS` /
+  `BUY_STATIONS` / `TEAM_SPAWNS` / `SPAWNS` (deathmatch) / `WAYPOINTS` / `WALLS`.
+  Changing a map's anchors means updating both sides by hand.
 - **Cash Raid economy:** the enemy vault is a money *source* — raiding mints
   fresh cash (it does not drain the enemy bank), so banks can climb to the win
   target. See the comment in `CashRaidRules.steal`.
