@@ -21,10 +21,14 @@ interface DiffParams {
   fireAngle: number;
 }
 
+// Tuned down from the original (much) sharper values: bots were landing
+// near-instant, near-perfect shots. Higher aimError + looser fireAngle make
+// them miss more, lower aimLerp makes them track strafing targets worse, and
+// higher reaction stops them gibbing the instant a target appears.
 const DIFFICULTY: Record<MatchConfig['difficulty'], DiffParams> = {
-  rookie:  { aimError: 0.14,  aimLerp: 5,  reaction: 0.55, fireAngle: 0.17 },
-  skilled: { aimError: 0.06,  aimLerp: 9,  reaction: 0.30, fireAngle: 0.11 },
-  deadly:  { aimError: 0.025, aimLerp: 17, reaction: 0.14, fireAngle: 0.07 },
+  rookie:  { aimError: 0.22, aimLerp: 4,    reaction: 0.85, fireAngle: 0.20 },
+  skilled: { aimError: 0.11, aimLerp: 6.5,  reaction: 0.55, fireAngle: 0.14 },
+  deadly:  { aimError: 0.05, aimLerp: 11,   reaction: 0.32, fireAngle: 0.09 },
 };
 
 type State = 'roam' | 'combat' | 'hunt';
@@ -46,7 +50,13 @@ export class BotBrain {
   /** Set each frame: true when the bot wants to channel a vault interaction. */
   wantInteract = false;
   private target: Actor | null = null;
-  private targetAcquiredAt = 0;
+  /**
+   * game.time the bot most recently *gained* line of sight to its target.
+   * Firing is delayed by `reaction` after this, and it re-arms every time the
+   * target ducks out of view and re-peeks — so bots can't instantly snap onto
+   * a target the moment it reappears from behind cover.
+   */
+  private sightAcquiredAt = 0;
   private lastSeenAt = -99;
   private lastSeenPos = new THREE.Vector3();
 
@@ -98,6 +108,8 @@ export class BotBrain {
     // resolve state
     if (this.target && this.target.alive) {
       if (this.canSee(this.target)) {
+        // Re-arm the reaction delay whenever sight is regained after a gap.
+        if (g.time - this.lastSeenAt > 0.25) this.sightAcquiredAt = g.time;
         this.lastSeenAt = g.time;
         this.lastSeenPos.copy(this.target.position);
         this.state = 'combat';
@@ -142,7 +154,7 @@ export class BotBrain {
     }
     if (best && best !== this.target) {
       this.target = best;
-      this.targetAcquiredAt = this.game.time;
+      this.sightAcquiredAt = this.game.time;
     } else if (best) {
       this.target = best;
     }
@@ -331,7 +343,7 @@ export class BotBrain {
   }
 
   private tryFire(target: Actor, dist: number) {
-    if (this.game.time - this.targetAcquiredAt < this.p.reaction) return;
+    if (this.game.time - this.sightAcquiredAt < this.p.reaction) return;
     if (!this.bot.canFire()) return;
     // don't rocket yourself in the face
     if (this.bot.currentWeapon === 'rocket' && dist < 6) return;

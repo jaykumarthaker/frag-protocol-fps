@@ -7,10 +7,14 @@
  * different rooms can run different Cash Raid layouts in the same server.
  */
 
+import { losBlocked } from './cashraid-map.mjs';
+
 const BOT_SPEED = 8.5;
-const SIGHT = 32;
-const FIRE_CD = { rookie: 0.95, skilled: 0.6, deadly: 0.4 };
-const FIRE_DMG = { rookie: 11, skilled: 17, deadly: 24 };
+const SIGHT = 26;
+// Tuned down: bots were firing too fast and hitting too hard. They also now
+// require line of sight (see `shoot`), so they no longer kill through walls.
+const FIRE_CD = { rookie: 1.2, skilled: 0.85, deadly: 0.6 };
+const FIRE_DMG = { rookie: 8, skilled: 12, deadly: 16 };
 
 /** Index of the waypoint in `map` nearest (x,z). */
 export function nearestWp(map, x, z) {
@@ -128,6 +132,9 @@ export function tickBot(bot, room, dt) {
 
 function shoot(bot, target, td, room, now) {
   if (!target || td > SIGHT || now < bot.ai.fireAt) return;
+  // Cash Raid maps carry wall geometry — don't fire (or deal damage) through
+  // it. Deathmatch rooms have no server-side blockers, so this is a no-op there.
+  if (room.cash && losBlocked(room.map, bot.x, bot.z, target.x, target.z)) return;
   bot.ai.fireAt = now + (FIRE_CD[room.config.difficulty] ?? 0.6);
   const dx = target.x - bot.x;
   const dy = (target.y + 1.0) - (bot.y + 1.0);
