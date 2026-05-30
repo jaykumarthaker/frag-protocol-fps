@@ -3,6 +3,7 @@ import type { Game } from '../core/Game';
 import type { Actor } from './Actor';
 import type { ProjectileKind } from '../weapons/Weapons';
 import { PULSE_COMBO_DAMAGE, PULSE_COMBO_RADIUS } from '../weapons/Weapons';
+import { sameTeam } from '../game/teams';
 
 export interface ProjectileOpts {
   owner: Actor;
@@ -28,6 +29,10 @@ export interface ProjectileOpts {
 
 const RADIUS: Record<ProjectileKind, number> = { rocket: 0.22, orb: 0.32, shard: 0.16 };
 
+/** Distance from an enemy's centre at which a rocket's proximity fuse trips,
+ *  detonating beside them so near-misses (around the legs) still splash. */
+const ROCKET_PROXIMITY = 1.6;
+
 /**
  * A moving projectile (rocket / plasma orb / flak chunk). Integrated manually
  * each frame; collisions are resolved by raycasting world geometry and by
@@ -50,6 +55,8 @@ export class Projectile {
   private radius: number;
   private bounces: number;
   private trailTimer = 0;
+  /** >0 enables a proximity fuse at this radius (rockets only). */
+  private proximityFuse: number;
 
   constructor(game: Game, opts: ProjectileOpts) {
     this.game = game;
@@ -63,6 +70,7 @@ export class Projectile {
     this.cosmetic = !!opts.cosmetic;
     this.bounces = opts.bounces ?? 0;
     this.radius = RADIUS[opts.kind] * (opts.radiusScale ?? 1);
+    this.proximityFuse = opts.kind === 'rocket' ? ROCKET_PROXIMITY : 0;
 
     const r = this.radius;
     const geo = opts.kind === 'rocket'
@@ -103,6 +111,9 @@ export class Projectile {
     const worldHit = this.game.physics.raycastWorld(prev, dir, segLen);
     let hitDist = worldHit ? worldHit.toi : Infinity;
     let hitActor: Actor | null = null;
+    // True when the closest hit is a proximity-fuse near-miss (splash only,
+    // no direct-hit bonus) rather than solid contact.
+    let proximityHit = false;
 
     // actors (direct hits — never the owner; cosmetic projectiles skip this)
     if (!this.opts.cosmetic) {
@@ -111,13 +122,23 @@ export class Projectile {
         const d = distPointToSegment(a.position, prev, this.pos);
         if (d < 0.62 + this.radius) {
           const along = a.position.clone().sub(prev).dot(dir);
-          if (along >= 0 && along < hitDist) { hitDist = along; hitActor = a; }
+          if (along >= 0 && along < hitDist) { hitDist = along; hitActor = a; proximityHit = false; }
+        } else if (this.proximityFuse > 0 && d < this.proximityFuse && this.canHarm(a)) {
+          // Near-miss: cook the rocket off at its closest approach so the
+          // blast still reaches a target it grazed past.
+          let along = a.position.clone().sub(prev).dot(dir);
+          along = Math.max(0, Math.min(segLen, along));
+          if (along < hitDist) { hitDist = along; hitActor = null; proximityHit = true; }
         }
       }
     }
 
     if (hitDist <= segLen) {
       this.pos.copy(prev).addScaledVector(dir, hitDist);
+      if (proximityHit) {
+        this.explode(null); // splash-only detonation beside the grazed target
+        return;
+      }
       if (!hitActor && worldHit && this.bounces > 0) {
         this.ricochet(worldHit.normal);
       } else {
@@ -200,6 +221,14 @@ export class Projectile {
     this.game.audio.play('combo', this.pos);
     this.feelExplosion(PULSE_COMBO_RADIUS * 1.3);
     this.remove();
+  }
+
+  /** Whether this projectile's owner could actually damage `a` — used to gate
+   *  the proximity fuse so it never trips on the owner or a teammate. */
+  private canHarm(a: Actor): boolean {
+    if (a === this.owner) return false;
+    if (this.game.gameMode === 'cashraid' && sameTeam(this.owner, a)) return false;
+    return true;
   }
 
   /** Shake the camera if the blast went off near the local player's view. */

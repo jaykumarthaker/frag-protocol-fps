@@ -144,8 +144,10 @@ export const WEAPONS: Record<string, WeaponDef> = {
       projectileKind: 'rocket',
       projectileSpeed: 42,
       projectileLife: 6,
-      splashRadius: 5.5,
-      splashDamage: 95,
+      // Bigger, harder blast + a proximity fuse (see Projectile) so shots that
+      // graze past — e.g. around the legs — still cook off beside the target.
+      splashRadius: 6.0,
+      splashDamage: 110,
       knockback: 26,
       queueMax: 3,
       chargeTime: 0.2,

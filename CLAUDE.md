@@ -35,11 +35,18 @@ manual smoke tests.
 
 ## Architecture
 
-- **`src/core/Game.ts`** — the orchestrator. Owns the renderer/scene, the game
-  loop, match lifecycle, the combat API (`hitscan`, `applyDamage`,
-  `radialDamage`, `onActorDied`), and all online message handling. `gameMode`
-  (`'deathmatch' | 'cashraid'`) and `mode` (`'offline' | 'online'`) gate
-  behaviour. Most new gameplay wires through here.
+Entry point: `src/main.ts` → `Game.create()`.
+
+- **`src/core/`** — `Game.ts` is the orchestrator: owns the
+  renderer/scene/camera, the post-FX composer, the game loop and state machine
+  (`menu → playing → paused → matchover`), match lifecycle, the combat API
+  (`hitscan`, `applyDamage`, `radialDamage`, `splashHasLineOfSight`,
+  `onActorDied`) and all online message handling. `gameMode` (`'deathmatch' |
+  'cashraid'`) and `mode` (`'offline' | 'online'`) gate behaviour; most new
+  gameplay wires through here. Also `Input.ts` (pointer-lock + keys),
+  `look.ts` (yaw/pitch → direction, spread), `Models.ts` (glTF character
+  loading + the character roster), `types.ts` (shared `DamageInfo` /
+  `HitscanResult` / `MatchConfig` / …).
 - **`src/game/`** — rules. `Match` (deathmatch) and `CashRaidRules` both
   implement `MatchRules`; `Game.match` holds either. `teams.ts` has team
   helpers (`sameTeam`, `enemyOf`, `TEAM_COLORS`). `shop.ts` is the buy
@@ -58,8 +65,9 @@ manual smoke tests.
 - **`src/net/protocol.ts`** — the wire protocol. Shared in spirit with the
   server but the server is plain JS, so **keep both sides in sync by hand**.
 - **`server/`** — `server.mjs` (connections + rooms map), `room.mjs` (one
-  room: lobby, authoritative match, Cash Raid money), `botbrain.mjs` (server
-  bots), `cashraid-map.mjs` (map data for the server).
+  room: lobby, authoritative match, Cash Raid money; `damage()` applies the
+  client-reported amount clamped to `[0, 500]`), `botbrain.mjs` (server bots),
+  `cashraid-map.mjs` (map data for the server).
 
 ## Conventions & invariants
 
@@ -82,6 +90,24 @@ manual smoke tests.
   target. See the comment in `CashRaidRules.steal`.
 - The shop maps the design doc's weapon names onto the four real weapons by
   price tier; `pulse` is the free starter weapon and is not sold.
+- **Splash damage is client-authoritative-via-report.** The firing client
+  computes radial damage (`radialDamage` offline / `radialDamageOnline` sends
+  one `hit` per target); the server only re-applies the reported amount
+  (clamped). Tuning a weapon's `splashRadius` / `splashDamage` in `Weapons.ts`
+  therefore changes both offline and online with no server edit.
+- **Rockets carry a proximity fuse** (`Projectile.ts`, rockets only): a rocket
+  that grazes *past* an enemy cooks off beside them so near-misses still splash.
+  It only trips on a target the owner can harm (never the owner, never a Cash
+  Raid teammate) and never detonates through a wall.
+- **Hit feedback:** a connecting shot sprays `Effects.blood` at the hit point
+  (offline and online). The local player's *own* damage reads through the HUD
+  red flash + camera shake instead, so no blood spawns inside the first-person
+  camera.
+- **Bots avoid the void.** On vertical maps (`AtriumArena`) `BotBrain`
+  down-probes the ground ahead before committing a heading and cancels
+  ledge-bound dodges, so they don't walk/strafe off into the kill plane
+  (`Actor` dies below `y = -25`). A no-floor probe = the void; survivable drops
+  still read as safe.
 
 ## Notes
 

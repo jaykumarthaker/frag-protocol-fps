@@ -738,7 +738,13 @@ export class Game {
     ) return;
     const res = target.takeDamage(info);
     if (res.dealt > 0) {
-      this.effects.impact(info.point, new THREE.Vector3(0, 1, 0), 0xff5a5a);
+      // Blood spray on the enemy confirms the hit; the local player's own
+      // damage reads through the red screen flash below instead.
+      if (target !== this.player) {
+        const dir = info.knockback && info.knockback.lengthSq() > 1e-4
+          ? info.knockback.clone() : new THREE.Vector3(0, 1, 0);
+        this.effects.blood(info.point, dir, res.dealt);
+      }
       this.audio.play('hit', target.position);
       if (info.attacker === this.player && target !== this.player) {
         this.hud.showHitmarker(res.died);
@@ -1615,7 +1621,9 @@ export class Game {
         t: 'hit', targetId: target.netId,
         amount: info.amount, weapon: info.weaponId, headshot: info.headshot,
       });
-      this.effects.impact(info.point, new THREE.Vector3(0, 1, 0), 0xff5a5a);
+      const dir = info.knockback && info.knockback.lengthSq() > 1e-4
+        ? info.knockback.clone() : new THREE.Vector3(0, 1, 0);
+      this.effects.blood(info.point, dir, info.amount);
       this.audio.play('hit', target.position);
       this.hud.showHitmarker(false);
       this.audio.play('hitmarker');
