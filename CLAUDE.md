@@ -46,24 +46,48 @@ Entry point: `src/main.ts` → `Game.create()`.
   gameplay wires through here. Also `Input.ts` (pointer-lock + keys),
   `look.ts` (yaw/pitch → direction, spread), `Models.ts` (glTF character
   loading + the character roster), `types.ts` (shared `DamageInfo` /
-  `HitscanResult` / `MatchConfig` / …).
+  `HitscanResult` / `MatchConfig` / …), `device.ts` (`isTouchDevice()`).
 - **`src/game/`** — rules. `Match` (deathmatch) and `CashRaidRules` both
   implement `MatchRules`; `Game.match` holds either. `teams.ts` has team
   helpers (`sameTeam`, `enemyOf`, `TEAM_COLORS`). `shop.ts` is the buy
   catalogue.
-- **`src/entities/`** — `Actor` base (player + bots), `Player`, `Bot`,
-  `RemotePlayer`; plus Cash Raid `VaultZone`, `BuyStation`, `CashDrop`.
+- **`src/entities/`** — `Actor` base (kinematic capsule + arena movement +
+  health/armour + inventory; `hitSpheres()` drive hit detection) subclassed by
+  `Player`, `Bot`, `RemotePlayer`. Plus `Projectile` (rockets / orbs / shards),
+  `Pickup`, `WeaponDrop`, and Cash Raid `VaultZone` / `BuyStation` / `CashDrop`.
+- **`src/weapons/`** — `Weapons.ts` is pure weapon data (four archetypes —
+  railgun / shard / rocket / pulse — each with a primary/secondary `FireSpec`).
+  `WeaponSystem.ts` resolves a shot (`hitscan` / `pellets` / `projectile`) for
+  any actor and spawns its effects. `WeaponModels.ts` builds the procedural
+  meshes (shared by the first-person viewmodel and the third-person held gun).
 - **`src/arena/`** — two maps: `Arena` (the "Foundry Duel" blockout, used
-  directly) and `AtriumArena`. **Every map plays in both modes.** A map's static
-  geometry is built in `build()`; the Cash Raid vault bunkers + buy kiosks + team
-  spawns are layered on at runtime by `addCashRaidStructures()` (using the base
-  helpers `addVaultBunker` / `addKiosk` / `addTeamSpawns`, which populate
-  `vaultDefs` / `buyDefs` / `teamSpawns`). `Game.ensureArena` rebuilds on a
-  `mode:mapId` key and calls `addCashRaidStructures()` only in Cash Raid.
-- **`src/ai/BotBrain.ts`** — perception, A* nav, combat; plus Cash Raid
-  raid/carry/defend objectives.
-- **`src/net/protocol.ts`** — the wire protocol. Shared in spirit with the
-  server but the server is plain JS, so **keep both sides in sync by hand**.
+  directly) and `AtriumArena` (a vertical multi-tier map over a bottomless
+  void). **Every map plays in both modes.** A map's static geometry is built in
+  `build()`; the Cash Raid vault bunkers + buy kiosks + team spawns are layered
+  on at runtime by `addCashRaidStructures()` (base helpers `addVaultBunker` /
+  `addKiosk` / `addTeamSpawns` populate `vaultDefs` / `buyDefs` / `teamSpawns`).
+  `MapRegistry.ts` lists the maps + per-mode defaults. `Game.ensureArena`
+  rebuilds on a `mode:mapId` key and calls `addCashRaidStructures()` only in
+  Cash Raid.
+- **`src/ai/`** — `BotBrain.ts`: perception (LOS scans), A* nav over the arena
+  waypoint graph (`nav.ts`), combat (strafe / approach / dodge / projectile
+  lead), weapon choice by range, ledge/void avoidance + wall-unstick, plus Cash
+  Raid raid/carry/defend objectives.
+- **`src/effects/Effects.ts`** — transient visual FX (tracers, beams, muzzle
+  flashes/rings, impacts, `blood` hit-spray, explosions). Each is a short-lived
+  Object3D the update loop expires and disposes.
+- **`src/physics/Physics.ts`** — thin Rapier wrapper: static cuboid world
+  colliders, one shared kinematic character controller, and `raycastWorld`
+  (skips actor capsules; actor hits are done in JS for per-body-part headshots).
+- **`src/audio/Audio.ts`** — fully procedural WebAudio SFX + positional
+  panning/attenuation; the announcer uses browser `SpeechSynthesis`.
+- **`src/ui/`** — `HUD` (HTML/CSS overlay: crosshair, health, hitmarker, kill
+  feed, cash events, scoreboard, prompts), `Menu` (main / online hub / lobby /
+  pause / end screens), `BuyMenu`, and `TouchControls` (on-screen pad for
+  phones — built only on touch devices).
+- **`src/net/`** — `protocol.ts` is the wire protocol; `NetClient.ts` wraps the
+  ws connection. Shared in spirit with the server but the server is plain JS,
+  so **keep both sides in sync by hand**.
 - **`server/`** — `server.mjs` (connections + rooms map), `room.mjs` (one
   room: lobby, authoritative match, Cash Raid money; `damage()` applies the
   client-reported amount clamped to `[0, 500]`), `botbrain.mjs` (server bots),
@@ -103,6 +127,15 @@ Entry point: `src/main.ts` → `Game.create()`.
   (offline and online). The local player's *own* damage reads through the HUD
   red flash + camera shake instead, so no blood spawns inside the first-person
   camera.
+- **All input flows through `Input`.** Game logic queries `Input` (`key`,
+  `mouse`, `mouseDX/DY`, …) and never reads raw DOM events. Touch support is an
+  additive layer: `TouchControls` feeds the same interface via `setKey` /
+  `setMouse` / `addLook`, and `Input.touch` fakes pointer-lock. So nothing in
+  movement / weapons / camera is input-source-aware. Touch devices are forced
+  to the `fast` quality tier in `Game.create`. The pad and HUD reflow for
+  portrait *and* landscape (CSS `@media (orientation: …)`), and `effectiveFov`
+  widens the (vertical) camera FOV on taller-than-wide screens so portrait keeps
+  a usable horizontal field instead of a keyhole.
 - **Bots avoid the void.** On vertical maps (`AtriumArena`) `BotBrain`
   down-probes the ground ahead before committing a heading and cancels
   ledge-bound dodges, so they don't walk/strafe off into the kill plane

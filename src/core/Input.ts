@@ -19,6 +19,10 @@ export class Input {
   /** Called when pointer lock is lost unexpectedly (used to auto-pause). */
   onPointerUnlock: (() => void) | null = null;
 
+  /** Touch mode: there is no Pointer Lock API on phones, so lock is faked and
+   *  movement / aim / buttons are fed by `TouchControls` via the setters below. */
+  touch = false;
+
   private el: HTMLElement;
 
   constructor(el: HTMLElement) {
@@ -37,11 +41,41 @@ export class Input {
   }
 
   requestLock() {
+    if (this.touch) { this.locked = true; return; }
     this.el.requestPointerLock();
   }
 
   exitLock() {
+    if (this.touch) { this.locked = false; return; }
     if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  // ---- virtual input (driven by TouchControls) ----------------------------
+
+  /** Set a key as held/released, recording the press edge like a real key. */
+  setKey(code: string, down: boolean) {
+    if (down) {
+      if (!this.keys.has(code)) this.pressedThisFrame.add(code);
+      this.keys.add(code);
+    } else {
+      this.keys.delete(code);
+    }
+  }
+
+  /** Set a mouse button as held/released (0 = fire, 2 = alt-fire). */
+  setMouse(btn: number, down: boolean) {
+    if (down) {
+      if (!this.mouseButtons.has(btn)) this.mousePressedThisFrame.add(btn);
+      this.mouseButtons.add(btn);
+    } else {
+      this.mouseButtons.delete(btn);
+    }
+  }
+
+  /** Feed an aim delta (touch-look), consumed like accumulated mouse motion. */
+  addLook(dx: number, dy: number) {
+    this.mouseDX += dx;
+    this.mouseDY += dy;
   }
 
   private onLockChange = () => {

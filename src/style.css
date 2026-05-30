@@ -578,3 +578,214 @@ button.mini {
 }
 .cs-info-desc { font-size: 12px; color: var(--text); margin-top: 4px; }
 .cs-info-status { font-size: 11px; color: var(--muted); margin-top: 6px; min-height: 1.2em; }
+
+/* ============================================================
+   TOUCH CONTROLS — on-screen pad (phones/tablets only)
+   Overlay sits above the HUD (z 10) but below the buy menu (40)
+   and the main/pause menu (50) so those stay tappable.
+   ============================================================ */
+
+#touch {
+  position: absolute; inset: 0;
+  z-index: 30;
+  /* The backdrop must capture touches so the move-stick / look drags work;
+     buttons sit on top and stop propagation so they don't double-fire. */
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+}
+
+/* Movement stick — visible at rest in the lower-left so it's discoverable;
+   floats to the thumb when dragged. Base is centred on (left, top). */
+.tc-stick {
+  position: absolute; width: 120px; height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  border: 2px solid rgba(54, 224, 255, 0.35);
+  background: rgba(10, 14, 22, 0.28);
+  pointer-events: none;
+  opacity: 0.5;
+}
+.tc-stick.dragging { opacity: 1; border-color: rgba(54, 224, 255, 0.7); }
+
+/* "Drag to look" hint on the right — fades out the first time you look. */
+.tc-look-hint {
+  position: absolute; right: 16%; top: 40%;
+  pointer-events: none;
+  color: rgba(207, 230, 240, 0.55);
+  font-size: 12px; letter-spacing: 2px;
+  border: 1px dashed rgba(54, 224, 255, 0.4);
+  padding: 8px 12px; border-radius: 8px;
+}
+.tc-stick-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 54px; height: 54px; margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  border: 2px solid rgba(54, 224, 255, 0.8);
+  background: rgba(54, 224, 255, 0.18);
+}
+
+/* Buttons */
+.tc-btn {
+  position: absolute;
+  pointer-events: auto;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 2px solid rgba(54, 224, 255, 0.5);
+  background: rgba(12, 24, 36, 0.45);
+  color: var(--text);
+  font-family: inherit; font-size: 12px; letter-spacing: 1px; font-weight: bold;
+  text-transform: uppercase;
+  width: 64px; height: 64px;
+  -webkit-tap-highlight-color: transparent;
+}
+.tc-btn.active {
+  background: rgba(54, 224, 255, 0.3);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Right-hand action cluster (offsets respect the notch via safe-area insets) */
+.tc-fire {
+  width: 96px; height: 96px; font-size: 14px;
+  border-color: rgba(255, 122, 24, 0.7); background: rgba(40, 18, 8, 0.5);
+  right: calc(24px + env(safe-area-inset-right));
+  bottom: calc(92px + env(safe-area-inset-bottom));
+}
+.tc-fire.active { background: rgba(255, 122, 24, 0.35); border-color: var(--orange); }
+.tc-jump {
+  width: 68px; height: 68px;
+  right: calc(132px + env(safe-area-inset-right));
+  bottom: calc(120px + env(safe-area-inset-bottom));
+}
+.tc-alt {
+  right: calc(40px + env(safe-area-inset-right));
+  bottom: calc(200px + env(safe-area-inset-bottom));
+}
+.tc-dodge {
+  right: calc(140px + env(safe-area-inset-right));
+  bottom: calc(206px + env(safe-area-inset-bottom));
+}
+
+/* Corner buttons */
+.tc-pause {
+  width: 48px; height: 48px; font-size: 16px;
+  top: calc(14px + env(safe-area-inset-top));
+  left: calc(14px + env(safe-area-inset-left));
+}
+.tc-scores {
+  width: 48px; height: 48px; font-size: 11px;
+  top: calc(14px + env(safe-area-inset-top));
+  right: calc(14px + env(safe-area-inset-right));
+}
+
+/* Weapon strip — top-centre row, dropped below the timer / scoreline / bank
+   HUD stack so the labels stay legible. */
+.tc-weapons {
+  position: absolute; top: calc(84px + env(safe-area-inset-top));
+  left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px;
+  pointer-events: none;
+}
+.tc-weap {
+  position: static;
+  width: 58px; height: 40px; border-radius: 8px; font-size: 11px;
+}
+
+/* Cash-Raid-only buttons — bottom centre */
+.tc-interact {
+  width: 64px; height: 64px;
+  border-color: rgba(255, 210, 63, 0.7); background: rgba(40, 34, 8, 0.5);
+  left: 50%; transform: translateX(-130%);
+  bottom: calc(24px + env(safe-area-inset-bottom));
+}
+.tc-buy {
+  width: 64px; height: 64px;
+  border-color: rgba(255, 210, 63, 0.7); background: rgba(40, 34, 8, 0.5);
+  left: 50%; transform: translateX(30%);
+  bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+/* Make the buy menu's tap close target obvious + comfortable on touch. */
+.buy-close {
+  float: right; margin-left: 12px;
+  width: 30px; height: 30px; line-height: 1; padding: 0;
+  border-radius: 6px; font-size: 14px;
+}
+
+/* ---- Portrait layout ----
+   The default control positions are tuned for a wide screen. Held upright the
+   screen is narrow + tall, so pull the thumb clusters down into reach, spread
+   the corners to the edges, and let the weapon strip wrap if it must. The 3D
+   view itself adapts via Game.effectiveFov (keeps a usable horizontal FOV). */
+@media (orientation: portrait) {
+  .tc-fire {
+    right: calc(20px + env(safe-area-inset-right));
+    bottom: calc(70px + env(safe-area-inset-bottom));
+  }
+  .tc-jump {
+    right: calc(116px + env(safe-area-inset-right));
+    bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+  .tc-alt {
+    right: calc(26px + env(safe-area-inset-right));
+    bottom: calc(168px + env(safe-area-inset-bottom));
+  }
+  .tc-dodge {
+    right: calc(118px + env(safe-area-inset-right));
+    bottom: calc(174px + env(safe-area-inset-bottom));
+  }
+  /* Interact/buy sit just above the move-stick zone on the lower left. */
+  .tc-interact {
+    left: calc(20px + env(safe-area-inset-left)); transform: none;
+    bottom: calc(168px + env(safe-area-inset-bottom));
+  }
+  .tc-buy {
+    left: calc(112px + env(safe-area-inset-left)); transform: none;
+    bottom: calc(174px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ============================================================
+   RESPONSIVE MENUS — phones / small windows
+   Menus are built for a desktop window (big logo, fixed-width panels). On a
+   small viewport that overflows and clips the buttons, so: let the screen
+   scroll, shrink the logo, and fit the fixed-width panels to the viewport.
+   Two triggers — narrow width (portrait phones) OR short height (landscape
+   phones) — so both orientations are covered.
+   ============================================================ */
+@media (max-width: 600px), (max-height: 540px) {
+  .screen {
+    justify-content: flex-start;       /* top-align so tall content can scroll */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 12px calc(20px + env(safe-area-inset-bottom));
+  }
+  .screen .logo { font-size: min(42px, 8vw); letter-spacing: 4px; margin-top: 4px; }
+  .screen .tag { font-size: 11px; letter-spacing: 4px; margin-bottom: 16px; }
+  .btn-row { flex-wrap: wrap; }
+  .help, .credits { max-width: 92vw; }
+}
+
+/* Narrow screens: collapse the fixed pixel widths to the viewport. */
+@media (max-width: 600px) {
+  .menu-card { min-width: 0; width: min(440px, 94vw); padding: 18px 16px; }
+  .menu-card h3 { margin-bottom: 12px; }
+  input[type=range] { width: 46vw; max-width: 220px; }
+  .menu-select { width: 46vw; max-width: 220px; }
+
+  /* online lobby — stack the two team columns */
+  .lobby-teams { flex-direction: column; gap: 10px; }
+  .lobby-team, .lobby-list { min-width: 0; }
+
+  /* in-match buy menu */
+  .buy-panel { min-width: 0; width: min(460px, 94vw); padding: 16px 14px; }
+  .buy-item { grid-template-columns: 24px 1fr 64px; gap: 6px; }
+  .buy-item .bi-blurb { display: none; }
+
+  /* character select — stack list / preview / info and scale the canvas */
+  .cs-wrap { flex-direction: column; align-items: center; gap: 12px; }
+  .cs-list { width: min(440px, 92vw); max-height: 26vh; }
+  .cs-info { width: min(440px, 92vw); }
+  .cs-stage canvas { max-width: 86vw; height: auto; }
+}
