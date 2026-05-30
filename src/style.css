@@ -588,19 +588,34 @@ button.mini {
 #touch {
   position: absolute; inset: 0;
   z-index: 30;
-  pointer-events: none;          /* only the buttons / drag zones capture */
+  /* The backdrop must capture touches so the move-stick / look drags work;
+     buttons sit on top and stop propagation so they don't double-fire. */
+  pointer-events: auto;
   touch-action: none;
   -webkit-user-select: none; user-select: none;
 }
 
-/* Dynamic movement stick — base is centred on the touch point. */
+/* Movement stick — visible at rest in the lower-left so it's discoverable;
+   floats to the thumb when dragged. Base is centred on (left, top). */
 .tc-stick {
   position: absolute; width: 120px; height: 120px;
-  margin: -60px 0 0 -60px;       /* centre on (left, top) */
+  margin: -60px 0 0 -60px;
   border-radius: 50%;
   border: 2px solid rgba(54, 224, 255, 0.35);
   background: rgba(10, 14, 22, 0.28);
   pointer-events: none;
+  opacity: 0.5;
+}
+.tc-stick.dragging { opacity: 1; border-color: rgba(54, 224, 255, 0.7); }
+
+/* "Drag to look" hint on the right — fades out the first time you look. */
+.tc-look-hint {
+  position: absolute; right: 16%; top: 40%;
+  pointer-events: none;
+  color: rgba(207, 230, 240, 0.55);
+  font-size: 12px; letter-spacing: 2px;
+  border: 1px dashed rgba(54, 224, 255, 0.4);
+  padding: 8px 12px; border-radius: 8px;
 }
 .tc-stick-knob {
   position: absolute; left: 50%; top: 50%;

@@ -31,7 +31,7 @@ export class TouchControls {
   private input: Input;
   private visible = false;
 
-  // movement stick (dynamic — appears where the left thumb lands)
+  // movement stick (rests in the lower-left, floats to the thumb on drag)
   private stick: HTMLDivElement;
   private knob: HTMLDivElement;
   private moveId: number | null = null;
@@ -42,6 +42,8 @@ export class TouchControls {
   private lookId: number | null = null;
   private lookX = 0;
   private lookY = 0;
+  private lookHint!: HTMLDivElement;
+  private lookUsed = false;
 
   // Cash-Raid-only buttons
   private interactBtn!: HTMLDivElement;
@@ -56,11 +58,16 @@ export class TouchControls {
     parent.appendChild(this.root);
 
     this.stick = document.createElement('div');
-    this.stick.className = 'tc-stick hidden';
+    this.stick.className = 'tc-stick';
     this.knob = document.createElement('div');
     this.knob.className = 'tc-stick-knob';
     this.stick.appendChild(this.knob);
     this.root.appendChild(this.stick);
+
+    this.lookHint = document.createElement('div');
+    this.lookHint.className = 'tc-look-hint';
+    this.lookHint.textContent = 'DRAG TO LOOK';
+    this.root.appendChild(this.lookHint);
 
     // --- action buttons (right-hand cluster + corners) ---
     this.addButton('tc-fire', 'FIRE', (d) => this.input.setMouse(0, d));
@@ -98,7 +105,12 @@ export class TouchControls {
     if (v === this.visible) return;
     this.visible = v;
     this.root.classList.toggle('hidden', !v);
-    if (!v) this.releaseAll();
+    if (v) {
+      this.homeStick();
+      this.lookHint.classList.toggle('hidden', this.lookUsed);
+    } else {
+      this.releaseAll();
+    }
   }
 
   /** Show or hide the Cash-Raid-only interact + buy buttons. */
@@ -139,7 +151,9 @@ export class TouchControls {
         this.moveId = t.identifier;
         this.moveBaseX = t.clientX;
         this.moveBaseY = t.clientY;
-        this.showStick(t.clientX, t.clientY);
+        this.stick.style.left = `${t.clientX}px`;
+        this.stick.style.top = `${t.clientY}px`;
+        this.stick.classList.add('dragging');
       } else if (this.lookId === null) {
         this.lookId = t.identifier;
         this.lookX = t.clientX;
@@ -154,6 +168,7 @@ export class TouchControls {
       if (t.identifier === this.moveId) {
         this.updateStick(t.clientX, t.clientY);
       } else if (t.identifier === this.lookId) {
+        if (!this.lookUsed) { this.lookUsed = true; this.lookHint.classList.add('hidden'); }
         this.input.addLook(
           (t.clientX - this.lookX) * LOOK_SCALE,
           (t.clientY - this.lookY) * LOOK_SCALE,
@@ -169,7 +184,7 @@ export class TouchControls {
     for (const t of Array.from(e.changedTouches)) {
       if (t.identifier === this.moveId) {
         this.moveId = null;
-        this.hideStick();
+        this.homeStick();
         this.clearMove();
       } else if (t.identifier === this.lookId) {
         this.lookId = null;
@@ -177,15 +192,12 @@ export class TouchControls {
     }
   };
 
-  private showStick(x: number, y: number) {
-    this.stick.style.left = `${x}px`;
-    this.stick.style.top = `${y}px`;
+  /** Park the stick at its resting home position (lower-left), knob centred. */
+  private homeStick() {
+    this.stick.style.left = '110px';
+    this.stick.style.top = `${window.innerHeight - 120}px`;
     this.knob.style.transform = 'translate(0px, 0px)';
-    this.stick.classList.remove('hidden');
-  }
-
-  private hideStick() {
-    this.stick.classList.add('hidden');
+    this.stick.classList.remove('dragging');
   }
 
   private updateStick(x: number, y: number) {
@@ -211,7 +223,7 @@ export class TouchControls {
   private releaseAll() {
     this.moveId = null;
     this.lookId = null;
-    this.hideStick();
+    this.homeStick();
     for (const c of [
       'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'Dodge', 'KeyE', 'KeyB', 'Tab',
       'Escape', 'Digit1', 'Digit2', 'Digit3', 'Digit4',
