@@ -25,7 +25,21 @@
       "Bash(cp /tmp/frag-shots/atrium_aerial.png atrium-aerial.png)",
       "Bash(cp /tmp/frag-shots/cr_overview.png cashraid-overview.png)",
       "Bash(cp /tmp/frag-shots/cr_action.png cashraid-action.png)",
-      "PowerShell(try { $p = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"Stopped dev server PID $p on :5177\" } } catch { \"No listener on :5177\" })"
+      "PowerShell(try { $p = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"Stopped dev server PID $p on :5177\" } } catch { \"No listener on :5177\" })",
+      "PowerShell(npm run typecheck)",
+      "PowerShell(npm run build)",
+      "PowerShell(npm run build 2>&1)",
+      "Bash(node touchshot.mjs)",
+      "PowerShell(try { $p = Get-NetTCPConnection -LocalPort 5180 -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess; if \\($p\\) { Stop-Process -Id $p -Force; \"Stopped dev server PID $p on :5180\" } } catch { \"No listener on :5180\" })",
+      "PowerShell(if \\($?\\) { \"TYPECHECK OK\" })",
+      "Bash(node touchfn.mjs)",
+      "Bash(node respshot.mjs)",
+      "Bash(node pwa-smoke.mjs)",
+      "Bash(node -e ' *)",
+      "Bash(node pwa-shot.mjs)",
+      "Bash(node pwa-sheet.mjs)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 4178 -State Listen -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop } catch {} }; \"preview stopped\")",
+      "Bash(node pause-shot.mjs)"
     ]
   }
 }

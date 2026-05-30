@@ -71,7 +71,15 @@
       "Bash(GAME_URL=\"http://localhost:5177/\" node badge2.mjs)",
       "Bash(GAME_URL=\"http://localhost:5177/\" node maps.mjs)",
       "Bash(GAME_URL=\"http://localhost:5178/\" node vault.mjs)",
-      "Bash(GAME_URL=\"http://localhost:5177/\" node repro.mjs)"
+      "Bash(GAME_URL=\"http://localhost:5177/\" node repro.mjs)",
+      "Bash(node -e \"for \\(const m of ['puppeteer-core','puppeteer','sharp','canvas','pngjs']\\) { try { require.resolve\\(m\\); console.log\\('FOUND', m\\); } catch { console.log\\('missing', m\\); } }\")",
+      "Bash(cd \"C:\\\\Users\\\\admin\\\\AppData\\\\Local\\\\Temp\\\\frag-shots\")",
+      "Bash(node -e \"try{require.resolve\\('puppeteer-core'\\);console.log\\('puppeteer-core FOUND in frag-shots'\\)}catch\\(e\\){console.log\\('not in frag-shots'\\)}\")",
+      "Bash(ls \"C:/Program Files/Google/Chrome/Application/chrome.exe\")",
+      "Bash(node make-icons.mjs)",
+      "Bash(node --check public/sw.js)",
+      "Bash(node overlap.mjs)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 4178 -State Listen -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop } catch {} }; \"preview stopped\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\admin\\AppData\\Local\\Temp\\frag-shots"

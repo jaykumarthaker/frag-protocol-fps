@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './core/Game';
+import { initInstall } from './ui/InstallPrompt';
 
 /**
  * Bootstrap: shows a loading panel while the WASM physics engine initialises,
@@ -7,6 +8,10 @@ import { Game } from './core/Game';
  */
 async function main() {
   const app = document.getElementById('app')!;
+
+  // Register the service worker and start listening for the install prompt
+  // before anything else, so a fast-firing `beforeinstallprompt` isn't missed.
+  initInstall();
 
   const loading = document.createElement('div');
   loading.id = 'loading';

@@ -789,3 +789,68 @@ button.mini {
   .cs-info { width: min(440px, 92vw); }
   .cs-stage canvas { max-width: 86vw; height: auto; }
 }
+
+/* ============================================================
+   PWA install — button on the main menu (phones only) + how-to
+   ============================================================ */
+.install-row {
+  display: flex;
+  justify-content: center;
+  /* A plain flow item with its own spacing — no negative margins, which on
+     short phone screens pulled the button down behind the menu card. The
+     z-index keeps it painting above the card even if they ever meet. */
+  margin: 6px 0 22px;
+  position: relative;
+  z-index: 1;
+}
+/* Collapsed entirely on desktop, where the button is never mounted here. */
+.install-row:empty { display: none; }
+
+.install-btn {
+  background: linear-gradient(180deg, #ff9a3c, #e0600a);
+  border: 1px solid #ffcf8a;
+  color: #1a0e02;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 12px 24px;
+  letter-spacing: 2px;
+  box-shadow: 0 0 18px rgba(255, 122, 24, 0.35);
+}
+.install-btn:hover {
+  background: linear-gradient(180deg, #ffb45e, #ff7a18);
+  box-shadow: 0 0 24px rgba(255, 122, 24, 0.55);
+}
+.install-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* How-to sheet (iOS / browsers without a one-tap install prompt). */
+.install-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(4, 7, 12, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  /* sit above the iOS home indicator / notch */
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+.install-card {
+  background: var(--panel);
+  border: 1px solid var(--accent-dim);
+  box-shadow: 0 12px 50px rgba(0, 0, 0, 0.6);
+  padding: 24px 26px;
+  max-width: min(420px, 92vw);
+}
+.install-title {
+  font-size: 14px; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 14px;
+}
+.install-body ol { margin: 0 0 18px 20px; padding: 0; }
+.install-body li { margin: 10px 0; line-height: 1.5; font-size: 14px; color: var(--text); }
+.install-body b { color: var(--orange); }
+.ish-glyph {
+  display: inline-flex; vertical-align: middle; color: var(--accent);
+  margin: 0 2px;
+}
+.install-close { width: 100%; }

@@ -9,6 +9,7 @@ import {
   type CharacterInstance,
 } from '../core/Models';
 import { MAPS, mapsForMode, DEFAULT_MAP } from '../arena/MapRegistry';
+import { mountInstallButton } from './InstallPrompt';
 
 /** Cash Raid economy defaults used for offline / instant-action matches. */
 export const CASHRAID_START_MONEY = 20000;
@@ -102,6 +103,7 @@ export class Menu {
     s.innerHTML = `
       <div class="logo">FRAG&nbsp;<span class="x">PROTOCOL</span></div>
       <div class="tag">Browser Arena Combat</div>
+      <div class="install-row" id="m-install"></div>
       <div class="menu-card">
         <h3>Instant Action</h3>
         <div class="field">
@@ -253,6 +255,9 @@ export class Menu {
     (s.querySelector('#m-online') as HTMLButtonElement).onclick = () => this.showOnlineHub();
     (s.querySelector('#m-character') as HTMLButtonElement).onclick = () => this.showCharacterSelect();
     (s.querySelector('#m-credits') as HTMLButtonElement).onclick = () => this.showCredits();
+
+    // On phones/tablets, offer to install the game to the home screen.
+    mountInstallButton(s.querySelector('#m-install') as HTMLElement);
   }
 
   // ---- character select ----------------------------------------------
@@ -766,6 +771,7 @@ export class Menu {
           <button id="p-restart">Restart</button>
           <button id="p-menu">Main Menu</button>
         </div>
+        <div class="install-row" id="p-install" style="margin:16px 0 0;"></div>
       </div>
       <div class="help">Click <b>Resume</b> or press <b>ESC</b> to get back in the fight.</div>
     `;
@@ -795,6 +801,9 @@ export class Menu {
     (s.querySelector('#p-resume') as HTMLButtonElement).onclick = () => this.h.onResume();
     (s.querySelector('#p-restart') as HTMLButtonElement).onclick = () => this.h.onRestart();
     (s.querySelector('#p-menu') as HTMLButtonElement).onclick = () => this.h.onMainMenu();
+
+    // Same install offer here, for players who decide mid-match (phones only).
+    mountInstallButton(s.querySelector('#p-install') as HTMLElement);
   }
 
   // ---- match over -----------------------------------------------------
