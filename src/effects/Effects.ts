@@ -192,6 +192,71 @@ export class Effects {
     });
   }
 
+  /**
+   * Blood spray when a shot connects with an enemy — a cone of dark-red
+   * droplets thrown along the shot direction plus a quick red mist puff. This
+   * is the "you hit them" feedback (PUBG-style): non-additive deep red so it
+   * reads as blood rather than another glowing energy burst. Spray volume
+   * scales with the damage dealt.
+   */
+  blood(pos: THREE.Vector3, dir: THREE.Vector3, amount = 30) {
+    const n = THREE.MathUtils.clamp(Math.round(4 + amount * 0.1), 5, 12);
+    const spray = dir.lengthSq() > 1e-6
+      ? dir.clone().normalize()
+      : new THREE.Vector3(0, 1, 0);
+
+    // Droplets: spheres flung in a cone around the spray direction, pulled
+    // down by gravity and shrinking as they fade.
+    const dropMat = new THREE.MeshBasicMaterial({ color: 0x9b0a0a });
+    const drops: { m: THREE.Mesh; v: THREE.Vector3 }[] = [];
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(this.sparkGeo, dropMat);
+      m.position.copy(pos);
+      const v = spray.clone()
+        .add(new THREE.Vector3(
+          (Math.random() - 0.5) * 1.1,
+          (Math.random() - 0.5) * 1.1 + 0.25,
+          (Math.random() - 0.5) * 1.1,
+        ))
+        .normalize()
+        .multiplyScalar(5 + Math.random() * 7);
+      drops.push({ m, v });
+      this.scene.add(m);
+    }
+    this.add({
+      obj: new THREE.Group(), life: 0.45, maxLife: 0.45,
+      tick: (e, dt) => {
+        const k = e.life / e.maxLife;
+        for (const d of drops) {
+          d.v.y -= 30 * dt;
+          d.m.position.addScaledVector(d.v, dt);
+          d.m.scale.setScalar(Math.max(0.05, k));
+        }
+      },
+      cleanup: () => {
+        for (const d of drops) this.scene.remove(d.m);
+        dropMat.dispose();
+      },
+    });
+
+    // A short-lived red mist at the impact point.
+    const mistMat = new THREE.SpriteMaterial({
+      color: 0xb71414, transparent: true, opacity: 0.85, depthWrite: false,
+    });
+    const mist = new THREE.Sprite(mistMat);
+    mist.position.copy(pos);
+    mist.scale.setScalar(0.5);
+    this.add({
+      obj: mist, life: 0.28, maxLife: 0.28,
+      tick: (e) => {
+        const k = 1 - e.life / e.maxLife;
+        mist.scale.setScalar(0.5 + k * 1.6);
+        mistMat.opacity = 0.85 * (1 - k);
+      },
+      cleanup: () => mistMat.dispose(),
+    });
+  }
+
   /** Explosion: expanding additive shell + shockwave ring + fading light. */
   explosion(pos: THREE.Vector3, radius: number, color: number) {
     const big = radius > 3;

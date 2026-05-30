@@ -34,6 +34,18 @@ const DIFFICULTY: Record<MatchConfig['difficulty'], DiffParams> = {
 type State = 'roam' | 'combat' | 'hunt';
 type BotRole = 'attacker' | 'defender';
 
+// --- ledge / void avoidance (keeps bots off the bottomless drops on
+// vertical maps like the Atrium) ---
+/** Down-probe length for the ground check. The void has no floor at all (the
+ *  ray simply misses), so any hit within this range means a survivable
+ *  landing — every real drop on these maps (the deepest being the crown→valley
+ *  overhang, ~35 m) tops out below it, and nothing finite lands in the kill
+ *  plane. A miss = the bottomless void. */
+const MAX_SAFE_DROP = 45;
+/** How far ahead (m) to probe the ground when walking / dodging. */
+const WALK_PROBE = 2.2;
+const DODGE_PROBE = 3.6;
+
 /**
  * Bot intelligence: perception (line-of-sight scans), waypoint navigation
  * (A*), target engagement (strafe / approach / dodge), difficulty-scaled
@@ -77,6 +89,10 @@ export class BotBrain {
 
   private stuckPos = new THREE.Vector3();
   private stuckTimer = 0;
+  /** Active wall-peel escape: drive `escapeDir` until `escapeUntil`. */
+  private escapeUntil = 0;
+  private escapeDir = new THREE.Vector3();
+  private readonly down = new THREE.Vector3(0, -1, 0);
 
   constructor(bot: Bot, game: Game, difficulty: MatchConfig['difficulty']) {
     this.bot = bot;
@@ -136,6 +152,7 @@ export class BotBrain {
 
     this.steerAim(dt);
     this.handleStuck(dt, intent);
+    this.avoidVoid(intent); // last word: never let a heading step into the void
     return intent;
   }
 
@@ -385,6 +402,11 @@ export class BotBrain {
   }
 
   private handleStuck(dt: number, intent: BotIntent) {
+    // While a wall-peel escape is running, drive its sidestep heading.
+    if (this.game.time < this.escapeUntil) {
+      intent.wishDir.copy(this.escapeDir);
+      return;
+    }
     if (intent.wishDir.lengthSq() < 0.01) { this.stuckTimer = 0; return; }
     if (this.bot.position.distanceTo(this.stuckPos) > 1.2) {
       this.stuckPos.copy(this.bot.position);
@@ -392,12 +414,62 @@ export class BotBrain {
       return;
     }
     this.stuckTimer += dt;
-    if (this.stuckTimer > 0.8) {
-      intent.jump = true;
-      this.repathAt = 0; // force a new path next roam tick
+    if (this.stuckTimer > 0.7) {
+      // Wedged against geometry: peel ~90° to one side (plus a touch of
+      // backing off), hop, and force a fresh path on the next roam tick. The
+      // side alternates so a re-stick tries the other way out.
+      const wish = intent.wishDir.clone().setY(0);
+      if (wish.lengthSq() < 1e-6) wish.set(Math.cos(this.bot.yaw), 0, Math.sin(this.bot.yaw));
+      wish.normalize();
+      this.escapeDir.set(-wish.z * this.strafeSign, 0, wish.x * this.strafeSign)
+        .addScaledVector(wish, -0.3).normalize();
+      this.escapeUntil = this.game.time + 0.5;
+      this.strafeSign *= -1;
+      this.repathAt = 0;
       this.stuckTimer = 0;
       this.stuckPos.copy(this.bot.position);
+      intent.jump = true;
+      intent.wishDir.copy(this.escapeDir);
     }
+  }
+
+  /** True if there is ground within `MAX_SAFE_DROP` below a point `ahead`
+   *  metres along `dir` from the bot — i.e. that heading doesn't walk off
+   *  into the void. A wall ahead reads as "ground" (solid hit), so this only
+   *  flags genuine bottomless drops. */
+  private hasGroundAhead(dir: THREE.Vector3, ahead: number): boolean {
+    const flat = dir.clone().setY(0);
+    if (flat.lengthSq() < 1e-6) return true;
+    flat.normalize();
+    const origin = this.bot.position.clone().addScaledVector(flat, ahead);
+    return this.game.physics.raycastWorld(origin, this.down, MAX_SAFE_DROP) !== null;
+  }
+
+  /** Veto any movement/dodge heading that would step the bot off a ledge into
+   *  the void. Deflects the walk heading to the nearest safe one, or stops the
+   *  bot dead if it's hemmed in by drops on every side. Only while grounded —
+   *  an airborne bot is already committed to its arc. */
+  private avoidVoid(intent: BotIntent) {
+    if (!this.bot.grounded) return;
+    if (intent.dodge && !this.hasGroundAhead(intent.dodge, DODGE_PROBE)) {
+      intent.dodge = null;
+    }
+    const wish = intent.wishDir;
+    if (wish.lengthSq() < 1e-6) return;
+    if (this.hasGroundAhead(wish, WALK_PROBE)) return;
+    // The desired heading runs off the edge — fan outward for the closest
+    // heading that still has floor under it.
+    const base = Math.atan2(wish.z, wish.x);
+    const len = Math.min(1, wish.length());
+    for (const off of [0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.2, -2.2]) {
+      const a = base + off;
+      const cand = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+      if (this.hasGroundAhead(cand, WALK_PROBE)) {
+        intent.wishDir.set(cand.x * len, 0, cand.z * len);
+        return;
+      }
+    }
+    intent.wishDir.set(0, 0, 0); // boxed in by void — hold rather than leap
   }
 }
 
