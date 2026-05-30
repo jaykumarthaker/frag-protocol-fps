@@ -46,7 +46,7 @@ Entry point: `src/main.ts` → `Game.create()`.
   gameplay wires through here. Also `Input.ts` (pointer-lock + keys),
   `look.ts` (yaw/pitch → direction, spread), `Models.ts` (glTF character
   loading + the character roster), `types.ts` (shared `DamageInfo` /
-  `HitscanResult` / `MatchConfig` / …).
+  `HitscanResult` / `MatchConfig` / …), `device.ts` (`isTouchDevice()`).
 - **`src/game/`** — rules. `Match` (deathmatch) and `CashRaidRules` both
   implement `MatchRules`; `Game.match` holds either. `teams.ts` has team
   helpers (`sameTeam`, `enemyOf`, `TEAM_COLORS`). `shop.ts` is the buy
@@ -83,7 +83,8 @@ Entry point: `src/main.ts` → `Game.create()`.
   panning/attenuation; the announcer uses browser `SpeechSynthesis`.
 - **`src/ui/`** — `HUD` (HTML/CSS overlay: crosshair, health, hitmarker, kill
   feed, cash events, scoreboard, prompts), `Menu` (main / online hub / lobby /
-  pause / end screens), `BuyMenu`.
+  pause / end screens), `BuyMenu`, and `TouchControls` (on-screen pad for
+  phones — built only on touch devices).
 - **`src/net/`** — `protocol.ts` is the wire protocol; `NetClient.ts` wraps the
   ws connection. Shared in spirit with the server but the server is plain JS,
   so **keep both sides in sync by hand**.
@@ -126,6 +127,15 @@ Entry point: `src/main.ts` → `Game.create()`.
   (offline and online). The local player's *own* damage reads through the HUD
   red flash + camera shake instead, so no blood spawns inside the first-person
   camera.
+- **All input flows through `Input`.** Game logic queries `Input` (`key`,
+  `mouse`, `mouseDX/DY`, …) and never reads raw DOM events. Touch support is an
+  additive layer: `TouchControls` feeds the same interface via `setKey` /
+  `setMouse` / `addLook`, and `Input.touch` fakes pointer-lock. So nothing in
+  movement / weapons / camera is input-source-aware. Touch devices are forced
+  to the `fast` quality tier in `Game.create`. The pad and HUD reflow for
+  portrait *and* landscape (CSS `@media (orientation: …)`), and `effectiveFov`
+  widens the (vertical) camera FOV on taller-than-wide screens so portrait keeps
+  a usable horizontal field instead of a keyhole.
 - **Bots avoid the void.** On vertical maps (`AtriumArena`) `BotBrain`
   down-probes the ground ahead before committing a heading and cancels
   ledge-bound dodges, so they don't walk/strafe off into the kill plane

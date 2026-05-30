@@ -24,6 +24,8 @@ import { WeaponDrop } from '../entities/WeaponDrop';
 import { HUD } from '../ui/HUD';
 import { Menu, type GameSettings } from '../ui/Menu';
 import { BuyMenu } from '../ui/BuyMenu';
+import { TouchControls } from '../ui/TouchControls';
+import { isTouchDevice } from './device';
 import { NetClient } from '../net/NetClient';
 import type { ServerMsg, NetPlayer, LobbyConfig } from '../net/protocol';
 import { WEAPONS, WEAPON_ORDER } from '../weapons/Weapons';
@@ -119,6 +121,8 @@ export class Game {
   cashDrops: CashDrop[] = [];
   weaponDrops: WeaponDrop[] = [];
   buyMenu!: BuyMenu;
+  /** On-screen controls; only constructed on touch devices. */
+  touchControls?: TouchControls;
 
   // online play
   mode: 'offline' | 'online' = 'offline';
@@ -154,6 +158,10 @@ export class Game {
     const g = new Game();
     g.parent = parent;
 
+    // Phones get the lightweight tier (no bloom, smaller shadows, lower pixel
+    // ratio) — the single biggest win for keeping a mobile GPU above 30fps.
+    if (isTouchDevice()) g.settings.quality = 'fast';
+
     const fast = g.settings.quality === 'fast';
     g.renderer = new THREE.WebGLRenderer({
       antialias: !fast, powerPreference: 'high-performance',
@@ -185,9 +193,15 @@ export class Game {
     g.audio = new Audio();
     g.input = new Input(g.renderer.domElement);
     g.weapons = new WeaponSystem(g);
+    g.input.touch = isTouchDevice();
     g.hud = new HUD(parent);
     g.hud.setVisible(false);
     g.buyMenu = new BuyMenu(parent);
+    // Tap-to-buy / tap-to-close mirror the digit + B/ESC keys (touch); harmless
+    // on desktop where they simply never get tapped.
+    g.buyMenu.onBuy = (i) => { if (g.state === 'playing') g.tryBuy(SHOP_ITEMS[i]); };
+    g.buyMenu.onClose = () => g.buyMenu.close();
+    if (g.input.touch) g.touchControls = new TouchControls(parent, g.input);
     g.menu = new Menu(parent, {
       settings: g.settings,
       onStart: (cfg) => g.startMatch(cfg),
@@ -384,6 +398,10 @@ export class Game {
       this.updateMenuBackdrop(dt);
     }
 
+    // Touch overlay shows only while actually playing (and not behind the buy
+    // menu); setVisible no-ops when the state hasn't changed.
+    this.touchControls?.setVisible(this.state === 'playing' && !this.buyMenu.isOpen);
+
     this.audio.setMasterVolume(this.settings.volume);
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
@@ -474,6 +492,7 @@ export class Game {
     const cashRaid = config.mode === 'cashraid';
     this.cashRules = cashRaid ? new CashRaidRules(config) : null;
     this.match = this.cashRules ?? new Match(config);
+    this.touchControls?.setCashRaid(cashRaid);
 
     const spawns = this.arena.spawnPoints;
     // In Cash Raid the local player + bots are split into two balanced teams;
@@ -727,6 +746,23 @@ export class Game {
   /** Add camera-shake trauma (clamped). Weapons, hits and blasts call this. */
   shake(amount: number) {
     this.shakeTrauma = Math.min(1, this.shakeTrauma + amount);
+  }
+
+  /**
+   * Adapt the (vertical) camera FOV to the viewport aspect. Three's `fov` is
+   * vertical, so a portrait screen would otherwise crush the *horizontal* view
+   * to a keyhole. On taller-than-wide screens we widen the vertical FOV to keep
+   * roughly the same horizontal field as a 16:9 screen, clamped to avoid a
+   * fisheye. Wide/landscape screens (aspect ≥ 1) are returned unchanged, so
+   * desktop and landscape play are untouched. ADS (scope) skips this.
+   */
+  effectiveFov(designVFov: number): number {
+    const aspect = this.camera.aspect;
+    if (aspect >= 1) return designVFov;
+    const REF = 16 / 9;
+    const hRef = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(designVFov) / 2) * REF);
+    const vNeeded = 2 * Math.atan(Math.tan(hRef / 2) / aspect);
+    return Math.min(115, THREE.MathUtils.radToDeg(vNeeded));
   }
 
   applyDamage(target: Actor, info: DamageInfo) {
@@ -1203,6 +1239,7 @@ export class Game {
     this.localId = msg.youId;
     this.time = 0;
     this.firstBloodDone = false;
+    this.touchControls?.setCashRaid(this.gameMode === 'cashraid');
     this.ensureArena(this.gameMode, msg.match.mapId);
 
     // Pre-load every character the match needs (local + remotes + bots).

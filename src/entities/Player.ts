@@ -95,7 +95,14 @@ export class Player extends Actor {
     wish.addScaledVector(rightXZ(this.yaw), s);
 
     const wantJump = input.keyPressed('Space');
-    const dodgeDir = this.detectDodge(input, f, s);
+    let dodgeDir = this.detectDodge(input, f, s);
+    // Touch: a dedicated dodge button dashes in the held direction (or forward).
+    if (!dodgeDir && input.keyPressed('Dodge')) {
+      const d = new THREE.Vector3()
+        .addScaledVector(forwardXZ(this.yaw), f)
+        .addScaledVector(rightXZ(this.yaw), s);
+      dodgeDir = d.lengthSq() > 1e-4 ? d : forwardXZ(this.yaw);
+    }
 
     this.move(dt, wish, wantJump, dodgeDir);
 
@@ -203,8 +210,12 @@ export class Player extends Actor {
 
   private applyCamera(dt: number, strafe: number) {
     // ---- FOV (zoom for railgun ADS) ----
+    // Non-ADS FOV is aspect-corrected so portrait keeps a usable horizontal
+    // view; the scope keeps its raw (zoomed) FOV.
     const adsDef = WEAPONS[this.currentWeapon]?.ads;
-    const targetFov = this.ads && adsDef ? adsDef.fov : this.game.settings.fov;
+    const targetFov = this.ads && adsDef
+      ? adsDef.fov
+      : this.game.effectiveFov(this.game.settings.fov);
     const k = 1 - Math.exp(-dt * 14);
     this.currentFov += (targetFov - this.currentFov) * k;
     if (Math.abs(this.camera.fov - this.currentFov) > 0.05) {
