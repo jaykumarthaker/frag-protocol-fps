@@ -745,3 +745,47 @@ button.mini {
     bottom: calc(174px + env(safe-area-inset-bottom));
   }
 }
+
+/* ============================================================
+   RESPONSIVE MENUS — phones / small windows
+   Menus are built for a desktop window (big logo, fixed-width panels). On a
+   small viewport that overflows and clips the buttons, so: let the screen
+   scroll, shrink the logo, and fit the fixed-width panels to the viewport.
+   Two triggers — narrow width (portrait phones) OR short height (landscape
+   phones) — so both orientations are covered.
+   ============================================================ */
+@media (max-width: 600px), (max-height: 540px) {
+  .screen {
+    justify-content: flex-start;       /* top-align so tall content can scroll */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 12px calc(20px + env(safe-area-inset-bottom));
+  }
+  .screen .logo { font-size: min(42px, 8vw); letter-spacing: 4px; margin-top: 4px; }
+  .screen .tag { font-size: 11px; letter-spacing: 4px; margin-bottom: 16px; }
+  .btn-row { flex-wrap: wrap; }
+  .help, .credits { max-width: 92vw; }
+}
+
+/* Narrow screens: collapse the fixed pixel widths to the viewport. */
+@media (max-width: 600px) {
+  .menu-card { min-width: 0; width: min(440px, 94vw); padding: 18px 16px; }
+  .menu-card h3 { margin-bottom: 12px; }
+  input[type=range] { width: 46vw; max-width: 220px; }
+  .menu-select { width: 46vw; max-width: 220px; }
+
+  /* online lobby — stack the two team columns */
+  .lobby-teams { flex-direction: column; gap: 10px; }
+  .lobby-team, .lobby-list { min-width: 0; }
+
+  /* in-match buy menu */
+  .buy-panel { min-width: 0; width: min(460px, 94vw); padding: 16px 14px; }
+  .buy-item { grid-template-columns: 24px 1fr 64px; gap: 6px; }
+  .buy-item .bi-blurb { display: none; }
+
+  /* character select — stack list / preview / info and scale the canvas */
+  .cs-wrap { flex-direction: column; align-items: center; gap: 12px; }
+  .cs-list { width: min(440px, 92vw); max-height: 26vh; }
+  .cs-info { width: min(440px, 92vw); }
+  .cs-stage canvas { max-width: 86vw; height: auto; }
+}

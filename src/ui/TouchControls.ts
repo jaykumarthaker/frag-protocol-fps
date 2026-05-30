@@ -97,7 +97,15 @@ export class TouchControls {
     this.root.addEventListener('touchmove', this.onMove, { passive: false });
     this.root.addEventListener('touchend', this.onEnd, { passive: false });
     this.root.addEventListener('touchcancel', this.onEnd, { passive: false });
+    // The resting stick is anchored to viewport height, so re-home it when the
+    // viewport changes (orientation flip) — otherwise it lands off-screen.
+    window.addEventListener('resize', this.onResize);
+    window.addEventListener('orientationchange', this.onResize);
   }
+
+  private onResize = () => {
+    if (this.visible && this.moveId === null) this.homeStick();
+  };
 
   /** Show only while actually playing; releasing all inputs on hide avoids a
    *  key sticking down when the match pauses mid-move. */
